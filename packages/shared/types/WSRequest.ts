@@ -49,6 +49,7 @@ export const ClientActionEnum = z.enum([
   "SET_SHAPE_FALLOFF",
   "SET_SHAPE_GROUP",
   "SET_MAP_METADATA",
+  "SET_ROOM_NAME",
   "SET_GEO_POSITION", // Client GPS update
   "SET_VISIBILITY", // Tab visibility (hidden tabs still receive sync)
 ]);
@@ -265,6 +266,13 @@ export const SetMapMetadataSchema = z.object({
 });
 export type SetMapMetadataType = z.infer<typeof SetMapMetadataSchema>;
 
+export const SetRoomNameSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.SET_ROOM_NAME),
+  /** Empty string clears the name (UI falls back to "Room <id>"). */
+  roomName: z.string().max(80),
+});
+export type SetRoomNameType = z.infer<typeof SetRoomNameSchema>;
+
 export const SetGeoPositionSchema = z.object({
   type: z.literal(ClientActionEnum.enum.SET_GEO_POSITION),
   lat: z.number(),
@@ -312,6 +320,7 @@ export const WSRequestSchema = z.discriminatedUnion("type", [
   SetShapeFalloffSchema,
   SetShapeGroupSchema,
   SetMapMetadataSchema,
+  SetRoomNameSchema,
   SetGeoPositionSchema,
   SetVisibilitySchema,
 ]);

@@ -16,6 +16,9 @@ interface RoomStateValues {
   roomType?: RoomTypeValue;
   // Default Leaflet view for map rooms — server-driven via MAP_METADATA_UPDATE.
   mapMetadata?: MapMetadataType;
+  // Server-driven display name for the room. Empty/undefined means "no name set"
+  // and the UI falls back to "Room <id>".
+  roomName?: string;
 }
 
 interface RoomState extends RoomStateValues {
@@ -25,6 +28,7 @@ interface RoomState extends RoomStateValues {
   setRequestedRoomType: (roomType: RoomTypeValue | undefined) => void;
   setRoomType: (roomType: RoomTypeValue) => void;
   setMapMetadata: (metadata: MapMetadataType) => void;
+  setRoomName: (name: string | undefined) => void;
   reset: () => void;
 }
 
@@ -36,6 +40,7 @@ const initialState: RoomStateValues = {
   requestedRoomType: undefined,
   roomType: undefined,
   mapMetadata: undefined,
+  roomName: undefined,
 };
 
 export const useRoomStore = create<RoomState>()((set) => ({
@@ -49,6 +54,7 @@ export const useRoomStore = create<RoomState>()((set) => ({
   setRequestedRoomType: (requestedRoomType) => set({ requestedRoomType }),
   setRoomType: (roomType) => set({ roomType }),
   setMapMetadata: (mapMetadata) => set({ mapMetadata }),
+  setRoomName: (roomName) => set({ roomName: roomName && roomName.length > 0 ? roomName : undefined }),
 
   // Reset to initial state
   reset: () =>

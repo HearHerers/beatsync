@@ -1,10 +1,14 @@
 "use client";
 import { SOCIAL_LINKS } from "@/constants";
 import { audioContextManager } from "@/lib/audioContextManager";
-import { MAX_NTP_MEASUREMENTS, useGlobalStore } from "@/store/global";
-import { Crown, Hash, Users } from "lucide-react";
+import { MAX_NTP_MEASUREMENTS, useCanMutate, useGlobalStore } from "@/store/global";
+import { useRoomStore } from "@/store/room";
+import { sendWSRequest } from "@/utils/ws";
+import { ClientActionEnum } from "@beatsync/shared";
+import { Crown, Hash, Pencil, Users } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
+import { useState } from "react";
 import { FaDiscord, FaGithub } from "react-icons/fa";
 import { SyncProgress } from "../ui/SyncProgress";
 
@@ -72,10 +76,7 @@ export const TopBar = ({ roomId }: TopBarProps) => {
               {syncMeasurementCount}/{MAX_NTP_MEASUREMENTS}
             </span>
           </div>
-          <div className="flex items-center">
-            <Hash size={12} className="mr-1" />
-            <span className="flex items-center">{roomId}</span>
-          </div>
+          <RoomNameAndId roomId={roomId} />
           <div className="flex items-center">
             <Users size={12} className="mr-1" />
             <span className="flex items-center">
@@ -129,3 +130,84 @@ export const TopBar = ({ roomId }: TopBarProps) => {
     </AnimatePresence>
   );
 };
+
+/**
+ * Inline room name + id. Admins (and anyone who can mutate in EVERYONE jam mode)
+ * see a click-to-edit pencil affordance; non-mutators just see the static name.
+ * Enter / blur commits, Esc cancels. Empty + commit clears the name on the
+ * server, which surfaces back as the plain "# <id>" fallback.
+ */
+function RoomNameAndId({ roomId }: { roomId: string }) {
+  const roomName = useRoomStore((s) => s.roomName);
+  const canMutate = useCanMutate();
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const startEdit = () => {
+    if (!canMutate) return;
+    setDraft(roomName ?? "");
+    setIsEditing(true);
+  };
+  const commit = () => {
+    setIsEditing(false);
+    const next = draft.trim();
+    // No-op if unchanged (avoid an unnecessary broadcast).
+    if (next === (roomName ?? "")) return;
+    const ws = useGlobalStore.getState().socket;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    sendWSRequest({
+      ws,
+      request: { type: ClientActionEnum.enum.SET_ROOM_NAME, roomName: next },
+    });
+  };
+  const cancel = () => {
+    setIsEditing(false);
+    setDraft("");
+  };
+
+  if (isEditing) {
+    return (
+      <div className="flex items-center">
+        <Hash size={12} className="mr-1" />
+        <input
+          autoFocus
+          value={draft}
+          maxLength={80}
+          placeholder={`Room ${roomId}`}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancel();
+            }
+          }}
+          className="bg-transparent border border-neutral-700 rounded px-1 text-xs text-white outline-none focus:border-neutral-500 min-w-32"
+        />
+        <span className="ml-2 text-neutral-600">#{roomId}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`flex items-center ${canMutate ? "cursor-pointer hover:text-white" : ""}`}
+      onClick={startEdit}
+      title={canMutate ? "Click to rename room" : undefined}
+    >
+      <Hash size={12} className="mr-1" />
+      {roomName ? (
+        <>
+          <span className="flex items-center text-neutral-200">{roomName}</span>
+          <span className="ml-2 text-neutral-600">#{roomId}</span>
+        </>
+      ) : (
+        <span className="flex items-center">{roomId}</span>
+      )}
+      {canMutate && <Pencil size={10} className="ml-1.5 text-neutral-600 group-hover:text-neutral-400" />}
+    </div>
+  );
+}

@@ -22,6 +22,7 @@ import { handleSetMetronome } from "@/websocket/handlers/setMetronome";
 import { handleSetLowPassFreq } from "@/websocket/handlers/setLowPassFreq";
 import { handleSetContextLoop } from "@/websocket/handlers/setContextLoop";
 import { handleAddTrackToContext, handleRemoveTrackFromContext } from "@/websocket/handlers/contextTracks";
+import { handleSetRoomName } from "@/websocket/handlers/setRoomName";
 import { handleSync } from "@/websocket/handlers/sync";
 import {
   handleAddShape,
@@ -182,6 +183,10 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.SET_MAP_METADATA]: {
     handle: handleSetMapMetadata,
     description: "Update the room's default Leaflet center/zoom",
+  },
+  [ClientActionEnum.enum.SET_ROOM_NAME]: {
+    handle: handleSetRoomName,
+    description: "Set or clear the room's display name (empty = use 'Room <id>')",
   },
   [ClientActionEnum.enum.SET_GEO_POSITION]: {
     handle: handleSetGeoPosition,
