@@ -20,6 +20,10 @@ export const ShapeSchema = z.object({
   createdBy: z.string(), // clientId of creator
   createdAt: z.number(), // epoch ms
 
+  // Optional curator-set display name. UI falls back to "Zone <first6chars>"
+  // when unset. Empty string clears the name.
+  name: z.string().max(80).optional(),
+
   // Shapes whose groupId matches play/pause together. null = solo transport.
   // (Note: enforced in the future; landed as a placeholder field for now.)
   groupId: z.string().nullable().default(null),

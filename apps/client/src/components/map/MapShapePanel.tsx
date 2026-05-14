@@ -73,8 +73,8 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between gap-2 border-b border-neutral-800/50 px-4 py-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-neutral-100">Zone {shape.id.slice(0, 6)}</div>
+        <div className="min-w-0 flex-1">
+          <ShapeNameEditor shape={shape} canMutate={canMutate} send={send} />
           <div className="text-[11px] text-neutral-500">{shape.type}</div>
         </div>
         {canMutate && (
@@ -152,3 +152,72 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
     </div>
   );
 };
+
+/**
+ * Inline editable shape name. Mutators see a click-to-edit pencil; non-mutators
+ * see the static label. Enter / blur commits, Esc cancels, empty commits clear
+ * the name (which falls back to "Zone <id-prefix>").
+ */
+function ShapeNameEditor({
+  shape,
+  canMutate,
+  send,
+}: {
+  shape: { id: string; name?: string };
+  canMutate: boolean;
+  send: (req: Parameters<typeof sendWSRequest>[0]["request"]) => void;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const fallback = `Zone ${shape.id.slice(0, 6)}`;
+  const displayed = shape.name ?? fallback;
+
+  const startEdit = () => {
+    if (!canMutate) return;
+    setDraft(shape.name ?? "");
+    setIsEditing(true);
+  };
+  const commit = () => {
+    setIsEditing(false);
+    const next = draft.trim();
+    if (next === (shape.name ?? "")) return;
+    send({ type: ClientActionEnum.enum.SET_SHAPE_NAME, shapeId: shape.id, name: next });
+  };
+  const cancel = () => {
+    setIsEditing(false);
+    setDraft("");
+  };
+
+  if (isEditing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        maxLength={80}
+        placeholder={fallback}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            cancel();
+          }
+        }}
+        className="w-full bg-transparent border border-neutral-700 rounded px-1.5 py-0.5 text-sm font-semibold text-neutral-100 outline-none focus:border-neutral-500"
+      />
+    );
+  }
+
+  return (
+    <div
+      onClick={startEdit}
+      className={`truncate text-sm font-semibold text-neutral-100 ${canMutate ? "cursor-pointer hover:text-white" : ""}`}
+      title={canMutate ? "Click to rename zone" : undefined}
+    >
+      {displayed}
+    </div>
+  );
+}
