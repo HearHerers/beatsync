@@ -19,6 +19,7 @@ import { Right } from "@/components/dashboard/Right";
 import { TopBar } from "@/components/room/TopBar";
 import { Button } from "@/components/ui/button";
 import { SyncProgress } from "@/components/ui/SyncProgress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import { audioContextManager } from "@/lib/audioContextManager";
 import { distanceToShapeEdgeMeters, proximityGainForShape } from "@/lib/geo";
@@ -27,7 +28,7 @@ import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { sendWSRequest } from "@/utils/ws";
 import { ClientActionEnum } from "@beatsync/shared";
-import { MapPin, MousePointer } from "lucide-react";
+import { ListMusic, MapPin, MapPinned, MessageCircle, MousePointer, Users } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect } from "react";
 import { EnsembleControls } from "./EnsembleControls";
@@ -199,25 +200,74 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
             <Right chatOnly />
           </div>
 
-          {/* Mobile / narrow layout — same vertical stack as desktop. */}
+          {/* Mobile / narrow layout — Map / Zone / Chat / Menu in a tab bar so
+              the chat + connected-users + audio-output controls (which the
+              desktop layout puts in the side rails) are reachable on narrow
+              viewports. */}
           <div className="flex flex-1 flex-col overflow-hidden lg:hidden min-h-0">
-            <div className="relative flex-[2] min-h-0">
-              <MapOverlays
-                locationMode={locationMode}
-                setLocationMode={setLocationMode}
-                isSupported={isSupported}
-                isWatching={isWatching}
-                latitude={latitude}
-                longitude={longitude}
-                accuracy={accuracy}
-                gpsError={gpsError}
-                ownPosition={ownPosition}
-              />
-              <MapCanvas canMutate={canMutate} />
-            </div>
-            <div className="flex flex-[1] min-h-0 flex-col border-t border-neutral-800/50 bg-neutral-900/40">
-              <MapShapePanel canMutate={canMutate} />
-            </div>
+            <Tabs defaultValue="map" className="flex-1 flex flex-col overflow-hidden min-h-0">
+              <TabsList className="shrink-0 grid w-full grid-cols-4 h-11 rounded-none p-0 bg-neutral-950/90">
+                <TabsTrigger
+                  value="map"
+                  className="rounded-none text-xs gap-1 h-full text-neutral-400 data-[state=active]:text-white data-[state=active]:bg-white/5 transition-colors"
+                >
+                  <MapPinned className="h-3.5 w-3.5" /> Map
+                </TabsTrigger>
+                <TabsTrigger
+                  value="zone"
+                  className="rounded-none text-xs gap-1 h-full text-neutral-400 data-[state=active]:text-white data-[state=active]:bg-white/5 transition-colors"
+                >
+                  <ListMusic className="h-3.5 w-3.5" /> Zone
+                </TabsTrigger>
+                <TabsTrigger
+                  value="chat"
+                  className="rounded-none text-xs gap-1 h-full text-neutral-400 data-[state=active]:text-white data-[state=active]:bg-white/5 transition-colors"
+                >
+                  <MessageCircle className="h-3.5 w-3.5" /> Chat
+                </TabsTrigger>
+                <TabsTrigger
+                  value="menu"
+                  className="rounded-none text-xs gap-1 h-full text-neutral-400 data-[state=active]:text-white data-[state=active]:bg-white/5 transition-colors"
+                >
+                  <Users className="h-3.5 w-3.5" /> Menu
+                </TabsTrigger>
+              </TabsList>
+
+              {/* MAP tab — full-bleed map with the overlay controls. */}
+              <TabsContent value="map" className="flex-1 mt-0 min-h-0 relative">
+                <MapOverlays
+                  locationMode={locationMode}
+                  setLocationMode={setLocationMode}
+                  isSupported={isSupported}
+                  isWatching={isWatching}
+                  latitude={latitude}
+                  longitude={longitude}
+                  accuracy={accuracy}
+                  gpsError={gpsError}
+                  ownPosition={ownPosition}
+                />
+                <MapCanvas canMutate={canMutate} />
+              </TabsContent>
+
+              {/* ZONE tab — the selected-shape playlist (the right column of
+                  the desktop layout). */}
+              <TabsContent value="zone" className="flex-1 mt-0 min-h-0">
+                <MapShapePanel canMutate={canMutate} />
+              </TabsContent>
+
+              {/* CHAT tab — full-height chat panel. */}
+              <TabsContent value="chat" className="flex-1 mt-0 min-h-0 overflow-hidden">
+                <Right chatOnly />
+              </TabsContent>
+
+              {/* MENU tab — connected users + audio output + room QR. Reuses
+                  the existing Left sidebar wholesale; hideUploader keeps the
+                  audio uploader out of map rooms (it lives per-shape in the
+                  Zone tab's playlist). */}
+              <TabsContent value="menu" className="flex-1 mt-0 min-h-0 overflow-y-auto">
+                <Left className="flex h-full w-full" hideUploader roomLabel="HereHear room" />
+              </TabsContent>
+            </Tabs>
           </div>
 
           {/* Bottom: ensemble play/pause for the whole installation. */}
