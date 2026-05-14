@@ -123,7 +123,11 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
       edit: { featureGroup: drawnItems, remove: true },
       draw: {
         polygon: { allowIntersection: false, showArea: false },
-        rectangle: false, // duplicates polygon for our purposes
+        // L.Rectangle extends L.Polygon — getLatLngs() returns the 4 corners
+        // as a single ring, so it serializes through the polygon branch in
+        // onCreated below without any rectangle-specific code. Faster to
+        // draw than an n-vertex polygon for orthogonal zones.
+        rectangle: {},
         circle: {},
         circlemarker: false,
         marker: false,
