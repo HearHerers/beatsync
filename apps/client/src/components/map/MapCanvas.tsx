@@ -70,10 +70,25 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     const zoom = mapMetadata?.zoom ?? 17;
 
     const map = L.map(containerRef.current, { zoomControl: true }).setView(center, zoom);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+
+    // Two base layers: Esri World Imagery satellite (default — much more useful
+    // than a street map for picking out features like buildings, paths, lawns
+    // when curating zones for an outdoor installation) and OpenStreetMap as a
+    // street-map fallback. A L.control.layers toggle lets users switch.
+    const satellite = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      {
+        maxZoom: 22,
+        attribution:
+          "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+      }
+    );
+    const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 22,
       attribution: "© OpenStreetMap contributors",
-    }).addTo(map);
+    });
+    satellite.addTo(map);
+    L.control.layers({ Satellite: satellite, Street: street }, undefined, { position: "topright" }).addTo(map);
 
     const drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
