@@ -1,9 +1,12 @@
 "use client";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/lib/utils";
-import { ClientDataType } from "@beatsync/shared";
+import { useGlobalStore } from "@/store/global";
+import { useRoomStore } from "@/store/room";
+import { sendWSRequest } from "@/utils/ws";
+import { ClientActionEnum, ClientDataType } from "@beatsync/shared";
 import { TooltipPortal } from "@radix-ui/react-tooltip";
-import { Crown, MoreVertical, User } from "lucide-react";
+import { Crown, MoreVertical, Pencil, User } from "lucide-react";
 import { motion } from "motion/react";
 import { memo, useState } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
@@ -125,9 +128,9 @@ export const ConnectedUserItem = memo<ConnectedUserItemProps>(({ client, isCurre
           </TooltipPortal>
         </Tooltip>
       )}
-      <div className="flex flex-col min-w-0">
+      <div className="flex flex-col min-w-0 flex-1">
         <div className="text-xs font-medium truncate">
-          <span>{client.username}</span>
+          {isCurrentUser ? <SelfUsernameEditor currentName={client.username} /> : <span>{client.username}</span>}
         </div>
       </div>
       <Badge
@@ -167,3 +170,68 @@ export const ConnectedUserItem = memo<ConnectedUserItemProps>(({ client, isCurre
 });
 
 ConnectedUserItem.displayName = "ConnectedUserItem";
+
+/**
+ * Inline editor for the logged-in user's display name. Click to edit, Enter or
+ * blur commits, Esc cancels. Sends SET_USERNAME to the server and mirrors into
+ * useRoomStore so the value persists if you leave + rejoin the same tab.
+ */
+function SelfUsernameEditor({ currentName }: { currentName: string }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const startEdit = () => {
+    setDraft(currentName);
+    setIsEditing(true);
+  };
+  const commit = () => {
+    setIsEditing(false);
+    const next = draft.trim();
+    if (next.length === 0 || next === currentName) return;
+    const ws = useGlobalStore.getState().socket;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    sendWSRequest({ ws, request: { type: ClientActionEnum.enum.SET_USERNAME, username: next } });
+    useRoomStore.getState().setUsername(next);
+  };
+  const cancel = () => {
+    setIsEditing(false);
+    setDraft("");
+  };
+
+  if (isEditing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        maxLength={40}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            cancel();
+          }
+        }}
+        className="w-full bg-neutral-950/40 border border-neutral-700 rounded px-1 py-0 text-xs font-medium outline-none focus:border-neutral-500"
+      />
+    );
+  }
+
+  return (
+    <span
+      onClick={(e) => {
+        e.stopPropagation();
+        startEdit();
+      }}
+      className="cursor-pointer hover:text-white inline-flex items-center gap-1 group/edit"
+      title="Click to edit your name"
+    >
+      <span className="truncate">{currentName}</span>
+      <Pencil className="h-2.5 w-2.5 text-neutral-500 opacity-0 group-hover/edit:opacity-100" />
+    </span>
+  );
+}

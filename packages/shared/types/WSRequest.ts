@@ -49,6 +49,7 @@ export const ClientActionEnum = z.enum([
   "SET_SHAPE_FALLOFF",
   "SET_SHAPE_GROUP",
   "SET_MAP_METADATA",
+  "SET_USERNAME",
   "SET_GEO_POSITION", // Client GPS update
   "SET_VISIBILITY", // Tab visibility (hidden tabs still receive sync)
 ]);
@@ -265,6 +266,13 @@ export const SetMapMetadataSchema = z.object({
 });
 export type SetMapMetadataType = z.infer<typeof SetMapMetadataSchema>;
 
+export const SetUsernameSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.SET_USERNAME),
+  /** Display name for this client. Trimmed + length-capped server-side. */
+  username: z.string().min(1).max(40),
+});
+export type SetUsernameType = z.infer<typeof SetUsernameSchema>;
+
 export const SetGeoPositionSchema = z.object({
   type: z.literal(ClientActionEnum.enum.SET_GEO_POSITION),
   lat: z.number(),
@@ -312,6 +320,7 @@ export const WSRequestSchema = z.discriminatedUnion("type", [
   SetShapeFalloffSchema,
   SetShapeGroupSchema,
   SetMapMetadataSchema,
+  SetUsernameSchema,
   SetGeoPositionSchema,
   SetVisibilitySchema,
 ]);
