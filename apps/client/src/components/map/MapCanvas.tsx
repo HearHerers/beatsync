@@ -69,7 +69,11 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     const center: L.LatLngTuple = mapMetadata?.center ?? [42.2808, -83.743];
     const zoom = mapMetadata?.zoom ?? 17;
 
-    const map = L.map(containerRef.current, { zoomControl: true }).setView(center, zoom);
+    // Allow zooming to z=23 (street-furniture-level) even though tile providers
+    // only ship native imagery up to z=19. Leaflet upscales the nearest-available
+    // native tile past that — pixelated but functional — which is exactly what
+    // we want for placing shapes precisely (e.g. tracing a single bench).
+    const map = L.map(containerRef.current, { zoomControl: true, maxZoom: 23 }).setView(center, zoom);
 
     // Two base layers: Esri World Imagery satellite (default — much more useful
     // than a street map for picking out features like buildings, paths, lawns
@@ -78,13 +82,15 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     const satellite = L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       {
-        maxZoom: 22,
+        maxZoom: 23,
+        maxNativeZoom: 19,
         attribution:
           "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
       }
     );
     const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 22,
+      maxZoom: 23,
+      maxNativeZoom: 19,
       attribution: "© OpenStreetMap contributors",
     });
     satellite.addTo(map);
