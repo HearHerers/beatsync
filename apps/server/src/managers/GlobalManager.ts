@@ -113,9 +113,6 @@ export class GlobalManager {
 
     // We are the first to arrive, so we'll do the calculation
     this.isCalculating = true;
-
-    console.log("Calculating active user count");
-
     try {
       // Calculate fresh count by summing clients from all rooms
       const newCount = Array.from(this.rooms.values()).reduce((acc, room) => acc + room.getNumClients(), 0);
