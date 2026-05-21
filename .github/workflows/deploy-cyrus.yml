@@ -1,0 +1,84 @@
+# Triggered on every push to herehear (and on manual dispatch). Opens an
+# outbound SSH session to cyrus's home workstation; the authorized_keys entry
+# there forces /usr/local/bin/beatsync-deploy.sh as the only command this key
+# can run, so this workflow can't be used to get a general shell.
+#
+# On failure: an issue is opened on this repo with the run URL and the tail
+# of the deploy script's output, so silent failures don't go unnoticed. The
+# live services are unaffected — the workstation deploy script aborts before
+# `systemctl restart` if anything earlier in the chain fails.
+name: Deploy to cyrus.herehear.party
+
+on:
+  push:
+    branches: [herehear]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cyrus
+  cancel-in-progress: false
+
+# issues: write needed for the failure step's `gh issue create`.
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: SSH-trigger the deploy script
+        id: ssh
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          # `tee` captures the deploy output for the failure step below.
+          # `set -o pipefail` (already set above) ensures we propagate ssh's
+          # exit code rather than tee's success.
+          ssh -p 2222 -i ~/.ssh/id_ed25519 \
+            -o BatchMode=yes -o ConnectTimeout=15 \
+            cyrus@cyrus.herehear.party 2>&1 | tee deploy.log
+
+      - name: Open issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          ACTOR: ${{ github.actor }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+          RUN_URL="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
+          COMMIT_URL="${SERVER_URL}/${REPO}/commit/${COMMIT_SHA}"
+          {
+            echo "Auto-deploy to \`cyrus.herehear.party\` failed."
+            echo
+            echo "- **Commit:** [\`${SHORT_SHA}\`](${COMMIT_URL})"
+            echo "- **Run:** ${RUN_URL}"
+            echo "- **Triggered by:** ${EVENT} from @${ACTOR}"
+            echo
+            echo "### Last 60 lines of deploy output"
+            echo
+            echo '```'
+            tail -60 deploy.log 2>/dev/null || echo '(no log captured — failure before SSH connected)'
+            echo '```'
+            echo
+            echo "The live services on the workstation are still running on the previously-deployed code; the deploy script aborts before \`systemctl restart\` on any earlier failure. Once the underlying issue is fixed in a subsequent push, the next deploy will roll forward."
+          } > issue-body.md
+          gh issue create \
+            --title "Deploy failed at ${SHORT_SHA}" \
+            --label deploy-failure \
+            --body-file issue-body.md
