@@ -25,6 +25,10 @@ const S3_CONFIG = {
 const r2Client = new S3Client({
   region: "auto",
   endpoint: S3_CONFIG.ENDPOINT,
+  // Path-style addressing: https://<endpoint>/<bucket>/<key> rather than
+  // virtual-hosted (https://<bucket>.<endpoint>/<key>). Required for MinIO
+  // behind a reverse proxy at a fixed bucket path; R2 supports both styles.
+  forcePathStyle: true,
   credentials: {
     accessKeyId: S3_CONFIG.ACCESS_KEY_ID,
     secretAccessKey: S3_CONFIG.SECRET_ACCESS_KEY,
