@@ -1,4 +1,5 @@
 import { ADMIN_SECRET, IS_DEMO_MODE } from "@/demo";
+import { validateR2Config } from "@/lib/r2";
 import { BackupManager } from "@/managers/BackupManager";
 import { getActiveRooms } from "@/routes/active";
 import { handleGetDefaultAudio } from "@/routes/default";
@@ -87,19 +88,26 @@ if (IS_DEMO_MODE) {
 }
 
 if (!IS_DEMO_MODE) {
-  // Restore state from backup on startup
-  BackupManager.restoreState().catch((error) => {
-    console.error("Failed to restore state on startup:", error);
-  });
-
-  // Set up periodic backups every minute (for Render persistence issues)
-  const BACKUP_INTERVAL_MS = 60 * 1000; // 1 minute
-  setInterval(() => {
-    console.log("🔄 Performing periodic backup at", new Date().toISOString());
-    BackupManager.backupState().catch((error) => {
-      console.error("Failed to perform periodic backup:", error);
+  // Restore + periodic-backup only when R2 is actually configured. Local dev
+  // without S3 credentials would otherwise log a fresh "❌ Failed to perform
+  // periodic backup" every 60 seconds — pure noise, since there's no R2 to
+  // talk to and restore is a no-op anyway.
+  const r2 = validateR2Config();
+  if (r2.isValid) {
+    BackupManager.restoreState().catch((error) => {
+      console.error("Failed to restore state on startup:", error);
     });
-  }, BACKUP_INTERVAL_MS);
+
+    // Set up periodic backups every minute (for Render persistence issues)
+    const BACKUP_INTERVAL_MS = 60 * 1000;
+    setInterval(() => {
+      BackupManager.backupState().catch((error) => {
+        console.error("Failed to perform periodic backup:", error);
+      });
+    }, BACKUP_INTERVAL_MS);
+  } else {
+    console.log(`ℹ️  R2 not configured (missing: ${r2.errors.join(", ")}); skipping state backup/restore.`);
+  }
 }
 
 // Simple graceful shutdown
