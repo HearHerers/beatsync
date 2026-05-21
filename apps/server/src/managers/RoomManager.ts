@@ -942,7 +942,6 @@ export class RoomManager {
 
     const updateSpatialAudio = () => {
       const clients = this.getClients();
-      console.log(`ROOM ${this.roomId} LOOP ${loopCount}: Connected clients: ${clients.length}`);
       if (clients.length === 0) return;
 
       // Calculate new position for listening source in a circle

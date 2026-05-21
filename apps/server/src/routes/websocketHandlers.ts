@@ -272,7 +272,12 @@ export const handleMessage = async (ws: ServerWebSocket<WSData>, message: string
     }
 
     const parsedMessage = WSRequestSchema.parse(parsedData);
-    console.log(`[Room: ${roomId}] | User: ${username} | Message: ${JSON.stringify(parsedMessage)}`);
+    // High-frequency presence messages (GPS, visibility) would drown out the
+    // server log otherwise. Only log the type for everything else, not the
+    // full JSON payload.
+    if (parsedMessage.type !== "SET_GEO_POSITION" && parsedMessage.type !== "SET_VISIBILITY") {
+      console.log(`[${roomId}] ${username}: ${parsedMessage.type}`);
+    }
 
     // Delegate to type-safe dispatcher
     await dispatchMessage({ ws, message: parsedMessage, server });
