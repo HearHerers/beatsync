@@ -1,0 +1,53 @@
+# Build + typecheck + lint + test on every PR and on direct pushes to herehear.
+# The deploy workflow rebuilds again on the workstation; this one's job is to
+# catch errors *before* they merge so reviewers see green/red status checks on
+# the PR, not just discover a broken commit when the deploy runs.
+#
+# Concurrency cancels in-progress runs on the same ref when a new commit comes
+# (you only care about the latest result). This differs from deploy-cyrus.yml,
+# which uses cancel-in-progress: false to never cut a deploy in half.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [herehear]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      # Typecheck both apps explicitly. `bun build` doesn't typecheck the
+      # server (Bun's bundler just transpiles), and `next build` does
+      # typecheck the client but we want a separate red signal so a PR with
+      # a TS error fails fast on the typecheck step rather than mid-build.
+      - name: Typecheck server
+        run: bun run --cwd apps/server type-check
+
+      - name: Typecheck client
+        run: bun run --cwd apps/client typecheck
+
+      - name: Lint server
+        run: bun run --cwd apps/server lint
+
+      - name: Lint client
+        run: bun run --cwd apps/client lint
+
+      - name: Build (turbo runs both apps in parallel)
+        run: bun run build
+
+      - name: Server tests
+        run: bun run --cwd apps/server test
