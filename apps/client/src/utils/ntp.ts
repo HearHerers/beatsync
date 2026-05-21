@@ -20,6 +20,30 @@ let pendingFirstProbeGroupId: number | null = null;
 let pureCount = 0;
 let impureCount = 0;
 
+/** A completed probe-pair result, captured for the debug UI. */
+export interface ProbeResult {
+  probeGroupId: number;
+  isPure: boolean;
+  clientGap: number;
+  serverGap: number;
+  gapDrift: number;
+  /** Only set when isPure (impure pairs are discarded by the offset estimator). */
+  bestRTT?: number;
+  bestOffset?: number;
+  /** Wall-clock ms at the moment the pair was validated. */
+  timestamp: number;
+}
+
+const PROBE_HISTORY_CAPACITY = 50;
+const probeHistory: ProbeResult[] = [];
+
+const recordProbeResult = (result: ProbeResult) => {
+  probeHistory.unshift(result);
+  if (probeHistory.length > PROBE_HISTORY_CAPACITY) {
+    probeHistory.length = PROBE_HISTORY_CAPACITY;
+  }
+};
+
 /** Reset probe state (call on connection reset) */
 export const resetProbeState = () => {
   probeGroupCounter = 0;
@@ -27,6 +51,7 @@ export const resetProbeState = () => {
   pendingFirstProbeGroupId = null;
   pureCount = 0;
   impureCount = 0;
+  probeHistory.length = 0;
 };
 
 /** Get probe pair stats for debugging */
@@ -36,6 +61,9 @@ export const getProbeStats = () => ({
   impureCount,
   totalSent: probeGroupCounter,
 });
+
+/** Snapshot of recent probe results (newest first), up to PROBE_HISTORY_CAPACITY entries. */
+export const getProbeHistory = (): ProbeResult[] => probeHistory.slice();
 
 /**
  * Send a coded probe pair (Huygens). Two NTP requests sent with a known
@@ -136,10 +164,28 @@ export const validateProbePair = (data: {
   }
 
   if (!isPure) {
+    recordProbeResult({
+      probeGroupId,
+      isPure: false,
+      clientGap,
+      serverGap,
+      gapDrift,
+      timestamp: Date.now(),
+    });
     return null;
   }
 
   const best = first.roundTripDelay <= measurement.roundTripDelay ? first : measurement;
+  recordProbeResult({
+    probeGroupId,
+    isPure: true,
+    clientGap,
+    serverGap,
+    gapDrift,
+    bestRTT: best.roundTripDelay,
+    bestOffset: best.clockOffset,
+    timestamp: Date.now(),
+  });
   return best;
 };
 
