@@ -1,0 +1,35 @@
+# Triggered on every push to herehear (and on manual dispatch). Opens an
+# outbound SSH session to cyrus's home workstation; the authorized_keys entry
+# there forces /usr/local/bin/beatsync-deploy.sh as the only command this key
+# can run, so this workflow can't be used to get a general shell.
+name: Deploy to cyrus.herehear.party
+
+on:
+  push:
+    branches: [herehear]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cyrus
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: SSH-trigger the deploy script
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          ssh -p 2222 -i ~/.ssh/id_ed25519 \
+            -o BatchMode=yes -o ConnectTimeout=15 \
+            cyrus@cyrus.herehear.party
