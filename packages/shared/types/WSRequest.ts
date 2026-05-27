@@ -41,6 +41,8 @@ export const ClientActionEnum = z.enum([
   "REMOVE_TRACK_FROM_CONTEXT", // Remove a track from a specific playlist context
   "REORDER_TRACK_IN_CONTEXT", // Reorder the tracks within a specific playlist context
   "IMPORT_TRACKS_TO_CONTEXT", // Bulk-add tracks (from an imported playlist file) to a context
+  "PLAY_ALL_CONTEXTS", // Start every eligible playlist context aligned to one shared serverTimeToExecute
+  "PAUSE_ALL_CONTEXTS", // Pause every currently-playing playlist context aligned to one shared serverTimeToExecute
   // Map-room geometry actions. Audio behavior of a shape's playlist (tracks,
   // play/pause, loop) flows through the unified per-context actions with
   // contextId = shape.id — there are no shape-specific audio actions.
@@ -244,6 +246,30 @@ export const ImportTracksToContextSchema = z.object({
 });
 export type ImportTracksToContextType = z.infer<typeof ImportTracksToContextSchema>;
 
+/**
+ * Start every eligible playlist context in the room aligned to one shared
+ * serverTimeToExecute. Each context starts at trackTimeSeconds=0 — restarts
+ * currently-playing contexts so they re-lock in phase. "Eligible" = playlist
+ * has at least one track; an empty audioSource defaults to tracks[0].url.
+ * Optional contextIds filter restricts the operation to a subset.
+ */
+export const PlayAllContextsSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.PLAY_ALL_CONTEXTS),
+  contextIds: z.array(z.string()).optional(),
+});
+export type PlayAllContextsType = z.infer<typeof PlayAllContextsSchema>;
+
+/**
+ * Pause every currently-playing playlist context in the room with one shared
+ * serverTimeToExecute. Contexts that aren't playing are skipped. Optional
+ * contextIds filter restricts the operation to a subset.
+ */
+export const PauseAllContextsSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.PAUSE_ALL_CONTEXTS),
+  contextIds: z.array(z.string()).optional(),
+});
+export type PauseAllContextsType = z.infer<typeof PauseAllContextsSchema>;
+
 // ── Map-room geometry ──────────────────────────────────────────────
 // Audio behavior (tracks, play/pause, loop) flows through the unified per-
 // context actions with contextId = shape.id. The shape actions below only
@@ -360,6 +386,8 @@ export const WSRequestSchema = z.discriminatedUnion("type", [
   RemoveTrackFromContextSchema,
   ReorderTrackInContextSchema,
   ImportTracksToContextSchema,
+  PlayAllContextsSchema,
+  PauseAllContextsSchema,
   // Map-room geometry
   AddShapeSchema,
   UpdateShapeSchema,
