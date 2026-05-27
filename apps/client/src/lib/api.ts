@@ -11,9 +11,8 @@ import axios from "axios";
 import { getApiUrl } from "./urls";
 
 const baseAxios = axios.create({
-  get baseURL() {
-    return getApiUrl();
-  },
+  baseURL: getApiUrl(),
+  withCredentials: true,
 });
 
 export const uploadAudioFile = async (data: { file: File; roomId: string; contextId?: string }) => {
