@@ -58,6 +58,19 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   const setOwnPosition = useMapStore((s) => s.setOwnPosition);
   const { clientId: myClientId } = useClientId();
 
+  // Keep Leaflet's internal size cache in sync with the container. Required
+  // when the panel surrounding the map is resized or collapsed/expanded —
+  // without it the tile grid stays at its old dimensions and renders gaps.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      mapRef.current?.invalidateSize();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // ── Initialize Leaflet map once ────────────────────────────────
   // This effect MUST NOT depend on canMutate — re-running it tears down the
   // map (and all shape layers) without re-firing the shape-render effect,
