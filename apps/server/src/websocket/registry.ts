@@ -22,6 +22,8 @@ import { handleSetMetronome } from "@/websocket/handlers/setMetronome";
 import { handleSetLowPassFreq } from "@/websocket/handlers/setLowPassFreq";
 import { handleSetContextLoop } from "@/websocket/handlers/setContextLoop";
 import { handleAddTrackToContext, handleRemoveTrackFromContext } from "@/websocket/handlers/contextTracks";
+import { handlePauseAllContexts } from "@/websocket/handlers/pauseAllContexts";
+import { handlePlayAllContexts } from "@/websocket/handlers/playAllContexts";
 import { handleSync } from "@/websocket/handlers/sync";
 import {
   handleAddShape,
@@ -152,6 +154,14 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.REMOVE_TRACK_FROM_CONTEXT]: {
     handle: handleRemoveTrackFromContext,
     description: "Remove a track from a specific playlist context",
+  },
+  [ClientActionEnum.enum.PLAY_ALL_CONTEXTS]: {
+    handle: handlePlayAllContexts,
+    description: "Start every eligible playlist context with one shared serverTimeToExecute",
+  },
+  [ClientActionEnum.enum.PAUSE_ALL_CONTEXTS]: {
+    handle: handlePauseAllContexts,
+    description: "Pause every currently-playing playlist context with one shared serverTimeToExecute",
   },
 
   // ── Map-room handlers ─────────────────────────────────────────────
