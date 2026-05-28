@@ -1,4 +1,4 @@
-# Triggered on every push to herehear (and on manual dispatch). Opens an
+# Triggered on every push to hearhere (and on manual dispatch). Opens an
 # outbound SSH session to cyrus's home workstation; the authorized_keys entry
 # there forces /usr/local/bin/beatsync-deploy.sh as the only command this key
 # can run, so this workflow can't be used to get a general shell.
@@ -7,11 +7,11 @@
 # of the deploy script's output, so silent failures don't go unnoticed. The
 # live services are unaffected — the workstation deploy script aborts before
 # `systemctl restart` if anything earlier in the chain fails.
-name: Deploy to cyrus.herehear.party
+name: Deploy to cyrus.hearhere.now
 
 on:
   push:
-    branches: [herehear]
+    branches: [hearhere]
   workflow_dispatch:
 
 concurrency:
@@ -46,7 +46,7 @@ jobs:
           # exit code rather than tee's success.
           ssh -p 2222 -i ~/.ssh/id_ed25519 \
             -o BatchMode=yes -o ConnectTimeout=15 \
-            cyrus@cyrus.herehear.party 2>&1 | tee deploy.log
+            cyrus@cyrus.hearhere.now 2>&1 | tee deploy.log
 
       - name: Open issue on failure
         if: failure()
@@ -64,7 +64,7 @@ jobs:
           RUN_URL="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
           COMMIT_URL="${SERVER_URL}/${REPO}/commit/${COMMIT_SHA}"
           {
-            echo "Auto-deploy to \`cyrus.herehear.party\` failed."
+            echo "Auto-deploy to \`cyrus.hearhere.now\` failed."
             echo
             echo "- **Commit:** [\`${SHORT_SHA}\`](${COMMIT_URL})"
             echo "- **Run:** ${RUN_URL}"
