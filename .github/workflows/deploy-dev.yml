@@ -1,0 +1,88 @@
+# Manual workflow to deploy any branch to cyrus's preview / dev instance at
+# https://cyrus-dev.hearhere.now. Useful for testing a PR on phone + laptop
+# simultaneously without merging.
+#
+# Trigger from the gh CLI:
+#   gh workflow run deploy-dev.yml -f branch=feat/whatever --repo HearHerers/hearhere
+#
+# Or from the Actions tab → "Deploy to cyrus-dev.hearhere.now" → Run workflow.
+#
+# Authentication path: a SEPARATE deploy key (DEPLOY_KEY_DEV) lives in the
+# workstation's authorized_keys with command="/usr/local/bin/beatsync-dev-deploy.sh"
+# pinned. The branch this workflow wants to deploy arrives at the deploy
+# script via $SSH_ORIGINAL_COMMAND. The script regex-sanitizes it before
+# passing to `git checkout`.
+name: Deploy to cyrus-dev.hearhere.now
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to deploy to dev
+        required: true
+        default: hearhere
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: SSH-trigger the dev deploy
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY_DEV }}
+          DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          # The branch becomes the SSH-level "command" — the forced-command
+          # in authorized_keys reads it via $SSH_ORIGINAL_COMMAND.
+          ssh -p 2222 -i ~/.ssh/id_ed25519 \
+            -o BatchMode=yes -o ConnectTimeout=15 \
+            cyrus@cyrus.hearhere.now \
+            "$BRANCH" 2>&1 | tee deploy.log
+
+      - name: Open issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          ACTOR: ${{ github.actor }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
+          {
+            echo "Dev deploy of \`${BRANCH}\` to \`cyrus-dev.hearhere.now\` failed."
+            echo
+            echo "- **Run:** ${RUN_URL}"
+            echo "- **Triggered by:** @${ACTOR}"
+            echo
+            echo "### Last 60 lines of deploy output"
+            echo
+            echo '```'
+            tail -60 deploy.log 2>/dev/null || echo '(no log captured)'
+            echo '```'
+            echo
+            echo "The production services at \`cyrus.hearhere.now\` are unaffected. Dev services keep running the previously-deployed branch (or whichever branch was last successfully deployed) until a successful deploy lands."
+          } > issue-body.md
+          gh issue create \
+            --title "Dev deploy of ${BRANCH} failed" \
+            --label deploy-failure \
+            --body-file issue-body.md
