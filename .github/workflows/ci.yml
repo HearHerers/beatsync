@@ -1,4 +1,4 @@
-# Build + typecheck + lint + test on every PR and on direct pushes to herehear.
+# Build + typecheck + lint + test on every PR and on direct pushes to hearhere.
 # The deploy workflow rebuilds again on the workstation; this one's job is to
 # catch errors *before* they merge so reviewers see green/red status checks on
 # the PR, not just discover a broken commit when the deploy runs.
@@ -11,7 +11,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [herehear]
+    branches: [hearhere]
 
 concurrency:
   group: ci-${{ github.ref }}
