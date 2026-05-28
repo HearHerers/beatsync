@@ -200,7 +200,7 @@ describe("Admin Persistence", () => {
     expect(activeClients.length).toBe(0);
   });
 
-  it("should handle empty room becoming populated again", () => {
+  it("should not auto-promote new joiners when cached admin data exists", () => {
     const ws1 = createMockWs({ clientId: "client-1", username: "user1", roomId: roomId });
     const ws2 = createMockWs({ clientId: "client-2", username: "user2", roomId: roomId });
 
@@ -210,25 +210,24 @@ describe("Admin Persistence", () => {
     room.removeClient("client-1");
     room.removeClient("client-2");
 
-    // Room is empty
+    // Room has no active connections, but clientData is preserved for rejoin
     expect(room.getClients().length).toBe(0);
 
-    // New client joins empty room (but with cached data)
+    // New client (no cached data) joins — should NOT be auto-promoted, because
+    // the original admin's cached data is still there and they may reclaim it.
     const ws3 = createMockWs({ clientId: "client-3", username: "user3", roomId: roomId });
     room.addClient(ws3);
 
-    // Should become admin as first active connection
     let clients = room.getClients();
-    expect(clients.find((c) => c.clientId === "client-3")?.isAdmin).toBe(true);
+    expect(clients.find((c) => c.clientId === "client-3")?.isAdmin).toBe(false);
 
-    // Old admin rejoins
+    // Original admin rejoins and reclaims admin status from cache
     const ws1Reconnect = createMockWs({ clientId: "client-1", username: "user1", roomId: roomId });
     room.addClient(ws1Reconnect);
 
-    // Old admin should reclaim admin status
     clients = room.getClients();
     expect(clients.find((c) => c.clientId === "client-1")?.isAdmin).toBe(true);
-    expect(clients.find((c) => c.clientId === "client-3")?.isAdmin).toBe(true);
+    expect(clients.find((c) => c.clientId === "client-3")?.isAdmin).toBe(false);
   });
 
   it("should preserve old username if it changes on rejoin", () => {
