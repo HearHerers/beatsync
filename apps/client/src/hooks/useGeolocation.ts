@@ -25,7 +25,6 @@ const defaultOptions: UseGeolocationOptions = {
 
 /**
  * Browser geolocation hook. Returns the current lat/lng plus start/stop controls.
- * Ported from hearhere/hearhere/src/useGeolocation.ts with no behavioral changes.
  */
 export const useGeolocation = (options: UseGeolocationOptions = defaultOptions) => {
   const [state, setState] = useState<GeolocationState>({
