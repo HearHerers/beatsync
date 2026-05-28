@@ -279,7 +279,7 @@ export const Join = () => {
                 disabled={isJoining || isCreating}
               >
                 <Map size={16} className="mr-2" />
-                <span>{isCreating ? "Creating..." : "Create HereHear room (geospatial)"}</span>
+                <span>{isCreating ? "Creating..." : "Create HearHere room (geospatial)"}</span>
               </motion.button>
 
               {/* <motion.button

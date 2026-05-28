@@ -21,7 +21,7 @@ interface LeftProps {
    *  shape's playlist column). Tips section still renders. */
   hideUploader?: boolean;
   /** Override the room header label. When set, the `#` icon is hidden and the
-   *  label renders as `{roomLabel} {roomId}` (e.g. map rooms use "HereHear room"). */
+   *  label renders as `{roomLabel} {roomId}` (e.g. map rooms use "HearHere room"). */
   roomLabel?: string;
 }
 
