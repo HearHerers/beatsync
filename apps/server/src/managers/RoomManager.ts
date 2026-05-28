@@ -486,8 +486,13 @@ export class RoomManager {
       clientData.nudgeMs = cachedClient.nudgeMs;
     }
 
-    // In demo mode, only the admin secret grants admin. Otherwise, first client gets admin.
-    if (!IS_DEMO_MODE && this.wsConnections.size === 0) {
+    // In demo mode, only the admin secret grants admin. Otherwise, the first
+    // client to ever join the room gets admin. We check clientData (not
+    // wsConnections) so that a new joiner doesn't get promoted just because the
+    // original admin disconnected — cached admin data is preserved for rejoin,
+    // and removeClient handles auto-promotion when an admin leaves with others
+    // still present.
+    if (!IS_DEMO_MODE && this.clientData.size === 0) {
       clientData.isAdmin = true;
     }
 
