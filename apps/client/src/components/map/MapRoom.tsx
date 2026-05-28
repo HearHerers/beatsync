@@ -254,7 +254,7 @@ const DesktopLayout = ({ canMutate, overlays }: PaneProps) => {
             onCollapse={() => leftRef.current?.collapse()}
             side="left"
           >
-            <Left className="flex h-full w-full lg:w-full" hideUploader roomLabel="HereHear room" />
+            <Left className="flex h-full w-full lg:w-full" hideUploader roomLabel="HearHere room" />
           </PanelShell>
         )}
       </ResizablePanel>
@@ -400,7 +400,7 @@ const MobileLayout = ({ canMutate, overlays }: PaneProps) => {
       <div className="flex flex-1 flex-col overflow-hidden min-h-0">
         {usersOpen && (
           <div className="flex-1 min-h-0 overflow-hidden border-b border-neutral-800/50">
-            <Left className="flex h-full w-full lg:w-full border-l-0" hideUploader roomLabel="HereHear room" />
+            <Left className="flex h-full w-full lg:w-full border-l-0" hideUploader roomLabel="HearHere room" />
           </div>
         )}
         {mapOpen && (
