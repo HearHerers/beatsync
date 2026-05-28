@@ -37,7 +37,7 @@ export const EnsembleControls = () => {
   }, [playlists]);
 
   const anyPlaying = playingCount > 0;
-  const disabled = !canMutate || !isConnected || totalWithTracks === 0;
+  const disabled = !isConnected || totalWithTracks === 0;
 
   const toggle = () => {
     const socket = useGlobalStore.getState().socket;
@@ -84,23 +84,25 @@ export const EnsembleControls = () => {
           ? "Draw a zone and add audio to start"
           : `${playingCount} of ${totalWithTracks} zone${totalWithTracks === 1 ? "" : "s"} playing`}
       </div>
-      <Button
-        size="sm"
-        variant={anyPlaying ? "secondary" : "default"}
-        onClick={toggle}
-        disabled={disabled}
-        className="h-8 px-3 text-xs"
-      >
-        {anyPlaying ? (
-          <>
-            <Pause className="mr-1 size-3.5" /> Pause all
-          </>
-        ) : (
-          <>
-            <Play className="mr-1 size-3.5" /> Play all
-          </>
-        )}
-      </Button>
+      {canMutate && (
+        <Button
+          size="sm"
+          variant={anyPlaying ? "secondary" : "default"}
+          onClick={toggle}
+          disabled={disabled}
+          className="h-8 px-3 text-xs"
+        >
+          {anyPlaying ? (
+            <>
+              <Pause className="mr-1 size-3.5" /> Pause all
+            </>
+          ) : (
+            <>
+              <Play className="mr-1 size-3.5" /> Play all
+            </>
+          )}
+        </Button>
+      )}
     </div>
   );
 };
