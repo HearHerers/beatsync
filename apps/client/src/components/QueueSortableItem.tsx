@@ -235,17 +235,28 @@ export const QueueSortableItem = ({
                 }}
                 className="absolute inset-0"
               >
-                {/* Play/Pause button (shown on hover) */}
-                <button className="text-white text-sm hover:scale-110 transition-transform w-full h-full flex items-center justify-center absolute inset-0 opacity-0 group-hover:opacity-100 select-none">
-                  {isSelected && isPlaying ? (
-                    <Pause className="fill-current size-3.5 stroke-1" />
-                  ) : (
-                    <Play className="fill-current size-3.5" />
-                  )}
-                </button>
+                {/* Play/Pause button (shown on hover). Hidden when the
+                    viewer can't mutate — otherwise visitors see a hover
+                    affordance that does nothing when clicked. */}
+                {canMutate && (
+                  <button className="text-white text-sm hover:scale-110 transition-transform w-full h-full flex items-center justify-center absolute inset-0 opacity-0 group-hover:opacity-100 select-none">
+                    {isSelected && isPlaying ? (
+                      <Pause className="fill-current size-3.5 stroke-1" />
+                    ) : (
+                      <Play className="fill-current size-3.5" />
+                    )}
+                  </button>
+                )}
 
-                {/* Playing indicator or track number (hidden on hover) */}
-                <div className="w-full h-full flex items-center justify-center group-hover:opacity-0 select-none">
+                {/* Playing indicator or track number. Only fades on hover
+                    when there's a play/pause button to swap in (i.e. the
+                    viewer can mutate); otherwise it stays visible. */}
+                <div
+                  className={cn(
+                    "w-full h-full flex items-center justify-center select-none",
+                    canMutate && "group-hover:opacity-0"
+                  )}
+                >
                   {isPlayingThis ? (
                     <div className="flex items-end justify-center h-4 w-4 gap-[2px]">
                       <div className="bg-primary-500 w-[2px] h-[40%] animate-[sound-wave-1_1.2s_ease-in-out_infinite]"></div>
@@ -255,7 +266,8 @@ export const QueueSortableItem = ({
                   ) : (
                     <span
                       className={cn(
-                        "text-sm group-hover:opacity-0 select-none",
+                        "text-sm select-none",
+                        canMutate && "group-hover:opacity-0",
                         isSelected ? "text-primary-400" : "text-neutral-400"
                       )}
                     >
