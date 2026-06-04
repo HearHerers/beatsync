@@ -71,10 +71,8 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
 
     const map = L.map(containerRef.current, { zoomControl: true }).setView(center, zoom);
 
-    // Two base layers: Esri World Imagery satellite (default — much more useful
-    // than a street map for picking out features like buildings, paths, lawns
-    // when curating zones for an outdoor installation) and OpenStreetMap as a
-    // street-map fallback. A L.control.layers toggle lets users switch.
+    // Default to satellite imagery — easier than a street map for picking out
+    // buildings/paths/lawns when curating zones. Street map offered as a toggle.
     const satellite = L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       {
