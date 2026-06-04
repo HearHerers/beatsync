@@ -123,7 +123,7 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
       edit: { featureGroup: drawnItems, remove: true },
       draw: {
         polygon: { allowIntersection: false, showArea: false },
-        rectangle: false, // duplicates polygon for our purposes
+        rectangle: {},
         circle: {},
         circlemarker: false,
         marker: false,
