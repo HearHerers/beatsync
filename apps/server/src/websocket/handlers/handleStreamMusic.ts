@@ -1,4 +1,4 @@
-import { IS_DEMO_MODE } from "@/demo";
+// import { IS_DEMO_MODE } from "@/demo";
 import { generateAudioFileName, uploadBytes } from "@/lib/r2";
 import { globalManager } from "@/managers";
 import { MUSIC_PROVIDER_MANAGER } from "@/managers/MusicProviderManager";
@@ -33,7 +33,8 @@ export const handleStreamMusic: HandlerFunction<ExtractWSRequestFrom["STREAM_MUS
   message,
   server,
 }) => {
-  if (IS_DEMO_MODE) return;
+  // Allow streaming from the provider (e.g. Navidrome) in demo mode.
+  // if (IS_DEMO_MODE) return;
   const roomId = ws.data.roomId;
 
   // Require room to exist before processing stream request
