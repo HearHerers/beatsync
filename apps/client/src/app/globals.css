@@ -217,3 +217,10 @@
   --color-primary-900: oklch(39.25% 0.0896 152.54);
   --color-primary-950: oklch(26.64% 0.0628 152.93);
 }
+
+/* Map rooms: Leaflet's layer switcher lives in the top-right corner, which is
+   also where the Manual/GPS overlay sits (absolute top-2 right-2, ~36px tall).
+   Nudge the top-right control stack below that row so they don't overlap. */
+.leaflet-top.leaflet-right {
+  margin-top: 2.75rem;
+}
