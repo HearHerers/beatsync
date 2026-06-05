@@ -117,6 +117,7 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   // room default and to know what an admin's "set as room default" broadcasts.
   const layersByIdRef = useRef<Partial<Record<MapTileLayerId, L.TileLayer>>>({});
   const activeTileLayerIdRef = useRef<MapTileLayerId>(BUILD_DEFAULT_TILE_ID);
+  const layersControlRef = useRef<L.Control.Layers | null>(null);
 
   const mapMetadata = useRoomStore((s) => s.mapMetadata);
   const defaultTileLayerId = useRoomStore((s) => s.defaultTileLayerId);
@@ -160,7 +161,7 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     layersById[initialId]?.addTo(map);
     activeTileLayerIdRef.current = initialId;
 
-    L.control.layers(baseLayers, undefined, { position: "topright" }).addTo(map);
+    layersControlRef.current = L.control.layers(baseLayers, undefined, { position: "topright" }).addTo(map);
 
     // Track local layer switches so the admin "set as room default" button knows
     // the current selection.
@@ -222,51 +223,45 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     activeTileLayerIdRef.current = targetId;
   }, [defaultTileLayerId]);
 
-  // ── Admin-only "set as room default" tile button ───────────────────
-  // Lets an admin push their currently-selected base map to everyone. Sits in
-  // the top-right control stack, just under the layer switcher. Non-admins (and
-  // anyone after admin promotion changes) get it added/removed via canMutate.
+  // ── Admin-only "set as room default" button (inside the layer chooser) ──
+  // Injected into the layer switcher's expandable list, so it only shows when an
+  // admin opens the chooser. Lets them push their current base map to everyone.
+  // Added/removed with canMutate (e.g. on admin promotion).
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !canMutate) return;
+    if (!canMutate) return;
+    const list = layersControlRef.current?.getContainer()?.querySelector(".leaflet-control-layers-list");
+    if (!list) return;
 
-    const BroadcastControl = L.Control.extend({
-      options: { position: "topright" as L.ControlPosition },
-      onAdd() {
-        const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
-        const btn = L.DomUtil.create("a", "", container) as HTMLAnchorElement;
-        btn.href = "#";
-        btn.title = "Make the current base map the room default for everyone";
+    const separator = L.DomUtil.create("div", "leaflet-control-layers-separator", list as HTMLElement);
+    const wrap = L.DomUtil.create("div", "", list as HTMLElement);
+    const btn = L.DomUtil.create("button", "", wrap) as HTMLButtonElement;
+    btn.type = "button";
+    btn.textContent = "Set as room default";
+    btn.title = "Make the current base map the room default for everyone";
+    btn.style.cssText =
+      "display:block;width:100%;padding:4px 6px;font-size:11px;line-height:1.2;cursor:pointer;" +
+      "border:1px solid #ccc;border-radius:3px;background:#f4f4f4;color:#222;";
+    L.DomEvent.disableClickPropagation(wrap);
+    L.DomEvent.on(btn, "click", (ev) => {
+      L.DomEvent.preventDefault(ev);
+      const ws = useGlobalStore.getState().socket;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      sendWSRequest({
+        ws,
+        request: {
+          type: ClientActionEnum.enum.SET_DEFAULT_TILE_LAYER,
+          tileLayerId: activeTileLayerIdRef.current,
+        },
+      });
+      btn.textContent = "✓ Set for everyone";
+      setTimeout(() => {
         btn.textContent = "Set as room default";
-        btn.style.width = "auto";
-        btn.style.padding = "0 8px";
-        btn.style.fontSize = "11px";
-        btn.style.lineHeight = "26px";
-        btn.style.whiteSpace = "nowrap";
-        L.DomEvent.disableClickPropagation(container);
-        L.DomEvent.on(btn, "click", (ev) => {
-          L.DomEvent.preventDefault(ev);
-          const ws = useGlobalStore.getState().socket;
-          if (!ws || ws.readyState !== WebSocket.OPEN) return;
-          sendWSRequest({
-            ws,
-            request: {
-              type: ClientActionEnum.enum.SET_DEFAULT_TILE_LAYER,
-              tileLayerId: activeTileLayerIdRef.current,
-            },
-          });
-          btn.textContent = "✓ Set for everyone";
-          setTimeout(() => {
-            btn.textContent = "Set as room default";
-          }, 1500);
-        });
-        return container;
-      },
+      }, 1500);
     });
-    const control = new BroadcastControl();
-    map.addControl(control);
+
     return () => {
-      map.removeControl(control);
+      separator.remove();
+      wrap.remove();
     };
   }, [canMutate]);
 
