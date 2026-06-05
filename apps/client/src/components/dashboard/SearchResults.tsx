@@ -22,7 +22,7 @@ export function SearchResults({ className, onTrackSelect }: SearchResultsProps) 
   const isSearching = useGlobalStore((state) => state.isSearching);
 
   // Track which tracks are currently being streamed to prevent duplicates
-  const streamingTracksRef = useRef<Set<number>>(new Set());
+  const streamingTracksRef = useRef<Set<string>>(new Set());
   const isLoadingMoreResults = useGlobalStore((state) => state.isLoadingMoreResults);
   const hasMoreResults = useGlobalStore((state) => state.hasMoreResults);
   const searchQuery = useGlobalStore((state) => state.searchQuery);

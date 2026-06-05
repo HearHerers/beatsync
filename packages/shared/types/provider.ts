@@ -10,7 +10,10 @@ export const SearchParamsSchema = z.object({
 });
 
 export const TrackParamsSchema = z.object({
-  id: z.number().min(0, "ID must be 0 or greater"),
+  // Track ID. Qobuz uses numeric IDs; Navidrome (Subsonic) uses opaque string
+  // hashes (e.g. "bfdabed4f741704cd74648a0a213bc67"), so this is a string and
+  // numeric providers are coerced to string at the adapter boundary.
+  id: z.string().min(1, "ID is required"),
 });
 
 export const AlbumSchema = z.object({
@@ -62,7 +65,9 @@ export const TrackSchema = z.object({
   version: z.string().nullable().optional(),
   duration: z.number(),
   parental_warning: z.boolean(),
-  id: z.number(),
+  // Opaque track ID. String to accommodate Navidrome/Subsonic hash IDs as well
+  // as numeric provider IDs (coerced to string by the provider adapter).
+  id: z.string(),
 });
 export type TrackType = z.infer<typeof TrackSchema>;
 
