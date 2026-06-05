@@ -6,6 +6,28 @@ import { sendBroadcast } from "@/utils/responses";
 import type { HandlerFunction } from "@/websocket/types";
 import type { ExtractWSRequestFrom } from "@beatsync/shared";
 
+// Map an audio MIME type to a file extension for the stored object key.
+// Falls back to mp3 for unknown/generic types (e.g. application/octet-stream).
+function audioExtensionFromContentType(contentType: string): string {
+  const type = contentType.split(";")[0].trim().toLowerCase();
+  const map: Record<string, string> = {
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/mp4": "m4a",
+    "audio/aac": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/ogg": "ogg",
+    "audio/opus": "opus",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/wave": "wav",
+    "audio/webm": "webm",
+  };
+  return map[type] ?? "mp3";
+}
+
 export const handleStreamMusic: HandlerFunction<ExtractWSRequestFrom["STREAM_MUSIC"]> = async ({
   ws,
   message,
@@ -56,18 +78,22 @@ export const handleStreamMusic: HandlerFunction<ExtractWSRequestFrom["STREAM_MUS
     console.log(`Downloading audio from: ${streamUrl}`);
     const response = await fetch(streamUrl);
 
-    // Generate a unique filename for R2
-    const fileName = generateAudioFileName(`${originalName}.mp3`);
-
     if (!response.ok) {
       throw new Error(`Failed to download audio: ${response.status}`);
     }
 
+    // Get content type from response headers, fallback to audio/mpeg.
+    // Providers serve varying formats (Navidrome returns the original file,
+    // e.g. FLAC), so derive the file extension from the content type rather
+    // than assuming .mp3 — keeps the object key and stored content type honest.
+    const contentType = response.headers.get("content-type") ?? "audio/mpeg";
+    const extension = audioExtensionFromContentType(contentType);
+
+    // Generate a unique filename for R2
+    const fileName = generateAudioFileName(`${originalName}.${extension}`);
+
     // Get audio bytes
     const arrayBuffer = await response.arrayBuffer();
-
-    // Get content type from response headers, fallback to audio/mpeg
-    const contentType = response.headers.get("content-type") ?? "audio/mpeg";
 
     // Upload directly to R2
     console.log(`Uploading to R2: room-${roomId}/${fileName}`);
