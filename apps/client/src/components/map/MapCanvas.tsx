@@ -39,16 +39,22 @@ const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 // Registry of selectable base maps. `id` is the stable value synced room-wide;
 // `label` is what the Leaflet layer switcher shows. "mapbox" only exists when a
 // token is configured at build time. Order = display order in the switcher.
+//
+// maxZoom is 23 everywhere so users can zoom in to street-furniture level for
+// precise shape placement; maxNativeZoom marks where each provider's real tiles
+// stop, past which Leaflet upscales the nearest tile (pixelated but functional).
+const MAP_MAX_ZOOM = 23;
 const TILE_LAYERS: { id: MapTileLayerId; label: string; create: () => L.TileLayer }[] = [
   ...(MAPBOX_TOKEN
     ? [
         {
           id: "mapbox" as MapTileLayerId,
           label: "Satellite (Mapbox)",
+          // 512px tiles with zoomOffset -1 reach ~z23 natively, so no maxNativeZoom.
           create: () =>
             L.tileLayer(
               `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`,
-              { maxZoom: 22, tileSize: 512, zoomOffset: -1, attribution: "© Mapbox © Maxar © OpenStreetMap" }
+              { maxZoom: MAP_MAX_ZOOM, tileSize: 512, zoomOffset: -1, attribution: "© Mapbox © Maxar © OpenStreetMap" }
             ),
         },
       ]
@@ -58,7 +64,8 @@ const TILE_LAYERS: { id: MapTileLayerId; label: string; create: () => L.TileLaye
     label: "Satellite (Esri)",
     create: () =>
       L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-        maxZoom: 22,
+        maxZoom: MAP_MAX_ZOOM,
+        maxNativeZoom: 19,
         attribution:
           "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
       }),
@@ -72,7 +79,7 @@ const TILE_LAYERS: { id: MapTileLayerId; label: string; create: () => L.TileLaye
       L.tileLayer(
         "https://imagery.michigan.gov/server/rest/services/Michigan_imagery_public/MapServer/tile/{z}/{y}/{x}",
         {
-          maxZoom: 22,
+          maxZoom: MAP_MAX_ZOOM,
           maxNativeZoom: 19,
           attribution: "Imagery &copy; State of Michigan (MiSAIL)",
         }
@@ -83,7 +90,8 @@ const TILE_LAYERS: { id: MapTileLayerId; label: string; create: () => L.TileLaye
     label: "Street",
     create: () =>
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 22,
+        maxZoom: MAP_MAX_ZOOM,
+        maxNativeZoom: 19,
         attribution: "© OpenStreetMap contributors",
       }),
   },
@@ -139,7 +147,11 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     const center: L.LatLngTuple = mapMetadata?.center ?? [42.2808, -83.743];
     const zoom = mapMetadata?.zoom ?? 17;
 
-    const map = L.map(containerRef.current, { zoomControl: true }).setView(center, zoom);
+    // Allow zooming to z=23 (street-furniture-level) even though tile providers
+    // only ship native imagery up to z=19. Leaflet upscales the nearest-available
+    // native tile past that — pixelated but functional — which is exactly what
+    // we want for placing shapes precisely (e.g. tracing a single bench).
+    const map = L.map(containerRef.current, { zoomControl: true, maxZoom: MAP_MAX_ZOOM }).setView(center, zoom);
 
     // Build the base-map layers from the registry. Satellite is the natural
     // default for picking out buildings/paths/lawns when curating zones; the
