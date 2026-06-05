@@ -100,22 +100,41 @@ export const handleStreamMusic: HandlerFunction<ExtractWSRequestFrom["STREAM_MUS
     console.log(`Uploading to R2: room-${roomId}/${fileName}`);
     const r2Url = await uploadBytes(arrayBuffer, roomId, fileName, contentType);
 
-    // Add the audio source to the room and get updated sources list
-    const sources = room.addAudioSource({ url: r2Url });
-
     console.log(`Successfully uploaded track to R2: ${r2Url}`);
-    console.log(`Broadcasting new audio sources to room ${roomId}: ${sources.length} total sources`);
 
-    // Broadcast to all room members that new audio is available
+    // When contextId is provided (map rooms streaming into a specific shape's
+    // playlist), append to that context. Otherwise fall back to the room-wide
+    // audioSources list (audio rooms / main playlist). Mirrors upload.ts.
+    const contextId = message.contextId;
+    if (contextId !== undefined) {
+      const tracks = room.addTrackToContext(contextId, { url: r2Url });
+      if (!tracks) {
+        console.error(`Stream request: playlist context "${contextId}" not found in room ${roomId}`);
+      }
+    } else {
+      const sources = room.addAudioSource({ url: r2Url });
+      console.log(`Broadcasting new audio sources to room ${roomId}: ${sources.length} total sources`);
+      sendBroadcast({
+        server,
+        roomId,
+        message: {
+          type: "ROOM_EVENT",
+          event: {
+            type: "SET_AUDIO_SOURCES",
+            sources,
+          },
+        },
+      });
+    }
+
+    // Always broadcast the unified per-context playlist snapshot so map rooms
+    // (and newer UI) stay in sync.
     sendBroadcast({
       server,
       roomId,
       message: {
         type: "ROOM_EVENT",
-        event: {
-          type: "SET_AUDIO_SOURCES",
-          sources,
-        },
+        event: { type: "PLAYLISTS_UPDATE", playlists: room.getPlaylistsView() },
       },
     });
   } catch (error) {

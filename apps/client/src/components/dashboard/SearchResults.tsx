@@ -14,9 +14,12 @@ import { toast } from "sonner";
 interface SearchResultsProps {
   className?: string;
   onTrackSelect?: () => void;
+  /** When set, streamed tracks are added to this playlist context (e.g. a
+   * shape.id in map rooms) rather than the room-wide "main" playlist. */
+  contextId?: string;
 }
 
-export function SearchResults({ className, onTrackSelect }: SearchResultsProps) {
+export function SearchResults({ className, onTrackSelect, contextId }: SearchResultsProps) {
   const isMobile = useIsMobile();
   const searchResults = useGlobalStore((state) => state.searchResults);
   const isSearching = useGlobalStore((state) => state.isSearching);
@@ -88,6 +91,7 @@ export function SearchResults({ className, onTrackSelect }: SearchResultsProps) 
           type: ClientActionEnum.enum.STREAM_MUSIC,
           trackId: track.id,
           trackName: formattedTrackName,
+          contextId,
         },
       });
 

@@ -15,7 +15,13 @@ interface SearchForm {
   query: string;
 }
 
-export function InlineSearch() {
+interface InlineSearchProps {
+  /** When set, streamed tracks are added to this playlist context (e.g. a
+   * shape.id in map rooms) rather than the room-wide "main" playlist. */
+  contextId?: string;
+}
+
+export function InlineSearch({ contextId }: InlineSearchProps = {}) {
   const [showResults, setShowResults] = React.useState(false);
   const [isFocused, setIsFocused] = React.useState(false);
   const [showCheckmark, setShowCheckmark] = React.useState(false);
@@ -334,7 +340,7 @@ export function InlineSearch() {
               )}
             >
               {isSearching || searchResults ? (
-                <SearchResults className="p-2" onTrackSelect={handleTrackSelection} />
+                <SearchResults className="p-2" onTrackSelect={handleTrackSelection} contextId={contextId} />
               ) : (
                 <div className="p-8 text-center">
                   <h3 className="text-lg font-medium text-white mb-2">Start typing to search</h3>
