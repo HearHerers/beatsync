@@ -81,14 +81,15 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
           "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
       }
     );
-    // USGS NAIP aerial — public domain, US-only, often fresher/sharper than Esri
-    // over rural sites. Native tiles stop at z16; Leaflet upscales beyond that.
-    const naip = L.tileLayer(
-      "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}",
+    // Michigan statewide hi-res aerial (MiSAIL) — keyless, ~9–12 in/px, native
+    // tiles to z19 (vs USGS NAIP's z16), so noticeably sharper than Esri over
+    // Michigan sites. Michigan-only; Leaflet upscales past z19.
+    const miAerial = L.tileLayer(
+      "https://imagery.michigan.gov/server/rest/services/Michigan_imagery_public/MapServer/tile/{z}/{y}/{x}",
       {
         maxZoom: 22,
-        maxNativeZoom: 16,
-        attribution: "Imagery &copy; USGS The National Map (NAIP)",
+        maxNativeZoom: 19,
+        attribution: "Imagery &copy; State of Michigan (MiSAIL)",
       }
     );
     const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -98,7 +99,7 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
 
     const baseLayers: Record<string, L.TileLayer> = {
       "Satellite (Esri)": esri,
-      "Aerial (NAIP, US)": naip,
+      "Aerial (Michigan)": miAerial,
       Street: street,
     };
 
