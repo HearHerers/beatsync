@@ -11,7 +11,7 @@ import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { useRoomStore } from "@/store/room";
 import { sendWSRequest } from "@/utils/ws";
-import type { ShapeType } from "@beatsync/shared";
+import type { MapTileLayerId, ShapeType } from "@beatsync/shared";
 import { ClientActionEnum } from "@beatsync/shared";
 import L from "leaflet";
 import "leaflet-draw";
@@ -34,6 +34,70 @@ interface MapCanvasProps {
   canMutate: boolean;
 }
 
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+
+// Registry of selectable base maps. `id` is the stable value synced room-wide;
+// `label` is what the Leaflet layer switcher shows. "mapbox" only exists when a
+// token is configured at build time. Order = display order in the switcher.
+const TILE_LAYERS: { id: MapTileLayerId; label: string; create: () => L.TileLayer }[] = [
+  ...(MAPBOX_TOKEN
+    ? [
+        {
+          id: "mapbox" as MapTileLayerId,
+          label: "Satellite (Mapbox)",
+          create: () =>
+            L.tileLayer(
+              `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`,
+              { maxZoom: 22, tileSize: 512, zoomOffset: -1, attribution: "© Mapbox © Maxar © OpenStreetMap" }
+            ),
+        },
+      ]
+    : []),
+  {
+    id: "esri",
+    label: "Satellite (Esri)",
+    create: () =>
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: 22,
+        attribution:
+          "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+      }),
+  },
+  {
+    id: "michigan",
+    label: "Aerial (Michigan)",
+    // Michigan statewide hi-res aerial (MiSAIL) — keyless, ~9–12 in/px, native
+    // tiles to z19; Michigan-only, Leaflet upscales past z19.
+    create: () =>
+      L.tileLayer(
+        "https://imagery.michigan.gov/server/rest/services/Michigan_imagery_public/MapServer/tile/{z}/{y}/{x}",
+        {
+          maxZoom: 22,
+          maxNativeZoom: 19,
+          attribution: "Imagery &copy; State of Michigan (MiSAIL)",
+        }
+      ),
+  },
+  {
+    id: "street",
+    label: "Street",
+    create: () =>
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 22,
+        attribution: "© OpenStreetMap contributors",
+      }),
+  },
+];
+
+// Default when no room default is set: Mapbox if available (sharpest), else Esri.
+const BUILD_DEFAULT_TILE_ID: MapTileLayerId = MAPBOX_TOKEN ? "mapbox" : "esri";
+
+// Resolve a (possibly stale/unavailable) id to one that actually exists in this
+// build — e.g. a room defaulting to "mapbox" on a deployment without a token.
+function resolveTileLayerId(id: MapTileLayerId | undefined): MapTileLayerId {
+  return id && TILE_LAYERS.some((t) => t.id === id) ? id : BUILD_DEFAULT_TILE_ID;
+}
+
 export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -49,8 +113,13 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   // Single marker for the current client.
   const ownMarkerRef = useRef<L.Marker | null>(null);
   const isDraggingOwnRef = useRef(false);
+  // Base-map layers keyed by id, and the id currently shown — used to apply the
+  // room default and to know what an admin's "set as room default" broadcasts.
+  const layersByIdRef = useRef<Partial<Record<MapTileLayerId, L.TileLayer>>>({});
+  const activeTileLayerIdRef = useRef<MapTileLayerId>(BUILD_DEFAULT_TILE_ID);
 
   const mapMetadata = useRoomStore((s) => s.mapMetadata);
+  const defaultTileLayerId = useRoomStore((s) => s.defaultTileLayerId);
   const connectedClients = useGlobalStore((s) => s.connectedClients);
   const shapes = useMapStore((s) => s.shapes);
   const selectedShapeId = useMapStore((s) => s.selectedShapeId);
@@ -71,57 +140,34 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
 
     const map = L.map(containerRef.current, { zoomControl: true }).setView(center, zoom);
 
-    // Default to satellite imagery — easier than a street map for picking out
-    // buildings/paths/lawns when curating zones. Street map offered as a toggle.
-    const esri = L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      {
-        maxZoom: 22,
-        attribution:
-          "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
-      }
-    );
-    // Michigan statewide hi-res aerial (MiSAIL) — keyless, ~9–12 in/px, native
-    // tiles to z19 (vs USGS NAIP's z16), so noticeably sharper than Esri over
-    // Michigan sites. Michigan-only; Leaflet upscales past z19.
-    const miAerial = L.tileLayer(
-      "https://imagery.michigan.gov/server/rest/services/Michigan_imagery_public/MapServer/tile/{z}/{y}/{x}",
-      {
-        maxZoom: 22,
-        maxNativeZoom: 19,
-        attribution: "Imagery &copy; State of Michigan (MiSAIL)",
-      }
-    );
-    const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 22,
-      attribution: "© OpenStreetMap contributors",
-    });
+    // Build the base-map layers from the registry. Satellite is the natural
+    // default for picking out buildings/paths/lawns when curating zones; the
+    // others (incl. Street) are offered in the layer switcher.
+    const layersById: Partial<Record<MapTileLayerId, L.TileLayer>> = {};
+    const baseLayers: Record<string, L.TileLayer> = {};
+    const labelToId: Record<string, MapTileLayerId> = {};
+    for (const def of TILE_LAYERS) {
+      const layer = def.create();
+      layersById[def.id] = layer;
+      baseLayers[def.label] = layer;
+      labelToId[def.label] = def.id;
+    }
+    layersByIdRef.current = layersById;
 
-    // Mapbox Satellite — most consistent worldwide quality, but requires a token.
-    // Only offered when one is configured so we never render broken tiles.
-    const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-    const mapbox = mapboxToken
-      ? L.tileLayer(
-          `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${mapboxToken}`,
-          {
-            maxZoom: 22,
-            tileSize: 512,
-            zoomOffset: -1,
-            attribution: "© Mapbox © Maxar © OpenStreetMap",
-          }
-        )
-      : null;
+    // Show the room's saved default if present (else the build default). The
+    // default may also arrive after init — the effect below handles that.
+    const initialId = resolveTileLayerId(useRoomStore.getState().defaultTileLayerId);
+    layersById[initialId]?.addTo(map);
+    activeTileLayerIdRef.current = initialId;
 
-    const baseLayers: Record<string, L.TileLayer> = {
-      ...(mapbox ? { "Satellite (Mapbox)": mapbox } : {}),
-      "Satellite (Esri)": esri,
-      "Aerial (Michigan)": miAerial,
-      Street: street,
-    };
-
-    // Default to Mapbox when a token is configured (sharpest), else Esri.
-    (mapbox ?? esri).addTo(map);
     L.control.layers(baseLayers, undefined, { position: "topright" }).addTo(map);
+
+    // Track local layer switches so the admin "set as room default" button knows
+    // the current selection.
+    map.on("baselayerchange", (e: L.LayersControlEvent) => {
+      const id = labelToId[e.name];
+      if (id) activeTileLayerIdRef.current = id;
+    });
 
     const drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
@@ -158,6 +204,71 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Apply the room-wide default tile layer ─────────────────────────
+  // Fires when an admin broadcasts a new default (DEFAULT_TILE_LAYER_UPDATE) or
+  // when the saved default arrives on connect. Switches every client's active
+  // base layer; users can still re-pick locally via the layer switcher.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !defaultTileLayerId) return;
+    const targetId = resolveTileLayerId(defaultTileLayerId);
+    const target = layersByIdRef.current[targetId];
+    if (!target || map.hasLayer(target)) return;
+    for (const layer of Object.values(layersByIdRef.current)) {
+      if (layer && layer !== target && map.hasLayer(layer)) map.removeLayer(layer);
+    }
+    map.addLayer(target);
+    activeTileLayerIdRef.current = targetId;
+  }, [defaultTileLayerId]);
+
+  // ── Admin-only "set as room default" tile button ───────────────────
+  // Lets an admin push their currently-selected base map to everyone. Sits in
+  // the top-right control stack, just under the layer switcher. Non-admins (and
+  // anyone after admin promotion changes) get it added/removed via canMutate.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !canMutate) return;
+
+    const BroadcastControl = L.Control.extend({
+      options: { position: "topright" as L.ControlPosition },
+      onAdd() {
+        const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+        const btn = L.DomUtil.create("a", "", container) as HTMLAnchorElement;
+        btn.href = "#";
+        btn.title = "Make the current base map the room default for everyone";
+        btn.textContent = "Set as room default";
+        btn.style.width = "auto";
+        btn.style.padding = "0 8px";
+        btn.style.fontSize = "11px";
+        btn.style.lineHeight = "26px";
+        btn.style.whiteSpace = "nowrap";
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.on(btn, "click", (ev) => {
+          L.DomEvent.preventDefault(ev);
+          const ws = useGlobalStore.getState().socket;
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          sendWSRequest({
+            ws,
+            request: {
+              type: ClientActionEnum.enum.SET_DEFAULT_TILE_LAYER,
+              tileLayerId: activeTileLayerIdRef.current,
+            },
+          });
+          btn.textContent = "✓ Set for everyone";
+          setTimeout(() => {
+            btn.textContent = "Set as room default";
+          }, 1500);
+        });
+        return container;
+      },
+    });
+    const control = new BroadcastControl();
+    map.addControl(control);
+    return () => {
+      map.removeControl(control);
+    };
+  }, [canMutate]);
 
   // ── Add/remove the draw control when admin status changes ──────
   // Keeps the same L.Map instance — only the control and its event handlers

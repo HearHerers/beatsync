@@ -14,6 +14,7 @@ import type {
   DiscoveryRoomType,
   GeoPositionType,
   MapMetadataType,
+  MapTileLayerId,
   PauseActionType,
   PlayActionType,
   PlaybackControlsPermissionsEnum,
@@ -32,6 +33,7 @@ import {
   LOW_PASS_CONSTANTS,
   MAIN_CONTEXT_ID,
   MapMetadataSchema,
+  MapTileLayerIdEnum,
   NTP_CONSTANTS,
   PlaylistPlaybackStateSchema,
   RoomTypeEnum,
@@ -97,6 +99,7 @@ const RoomBackupSchema = z.object({
   /** Map-room state. Only meaningful when roomType === "map". */
   roomType: RoomTypeEnum.optional(),
   mapMetadata: MapMetadataSchema.optional(),
+  defaultTileLayerId: MapTileLayerIdEnum.optional(),
   shapes: z.array(ShapeSchema).optional(),
 });
 export type RoomBackupType = z.infer<typeof RoomBackupSchema>;
@@ -227,6 +230,9 @@ export class RoomManager {
   // id = shape.id (the playlist holds its tracks + playback state).
   private roomType: RoomTypeValue = "audio";
   private mapMetadata?: MapMetadataType;
+  // Admin-chosen room-wide default base map. Undefined = clients use their
+  // build default (Mapbox if a token is set, else Esri).
+  private defaultTileLayerId?: MapTileLayerId;
   private readonly shapes = new Map<string, ShapeType>();
 
   constructor(
@@ -1163,14 +1169,21 @@ export class RoomManager {
       })),
       ...(this.roomType !== "audio" && { roomType: this.roomType }),
       ...(this.mapMetadata && { mapMetadata: this.mapMetadata }),
+      ...(this.defaultTileLayerId && { defaultTileLayerId: this.defaultTileLayerId }),
       ...(this.shapes.size > 0 && { shapes: Array.from(this.shapes.values()) }),
     };
   }
 
   /** Restore map-room state from a backup. */
-  restoreMapState(backup: { roomType?: RoomTypeValue; mapMetadata?: MapMetadataType; shapes?: ShapeType[] }): void {
+  restoreMapState(backup: {
+    roomType?: RoomTypeValue;
+    mapMetadata?: MapMetadataType;
+    defaultTileLayerId?: MapTileLayerId;
+    shapes?: ShapeType[];
+  }): void {
     if (backup.roomType) this.roomType = backup.roomType;
     if (backup.mapMetadata) this.mapMetadata = backup.mapMetadata;
+    if (backup.defaultTileLayerId) this.defaultTileLayerId = backup.defaultTileLayerId;
     if (backup.shapes) {
       this.shapes.clear();
       for (const s of backup.shapes) this.shapes.set(s.id, s);
@@ -1524,6 +1537,14 @@ export class RoomManager {
 
   setMapMetadata(metadata: MapMetadataType): void {
     this.mapMetadata = metadata;
+  }
+
+  getDefaultTileLayerId(): MapTileLayerId | undefined {
+    return this.defaultTileLayerId;
+  }
+
+  setDefaultTileLayer(tileLayerId: MapTileLayerId): void {
+    this.defaultTileLayerId = tileLayerId;
   }
 
   /** All currently-registered shapes (geometry only). */
