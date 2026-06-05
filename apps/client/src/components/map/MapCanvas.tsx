@@ -73,7 +73,7 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
 
     // Default to satellite imagery — easier than a street map for picking out
     // buildings/paths/lawns when curating zones. Street map offered as a toggle.
-    const satellite = L.tileLayer(
+    const esri = L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       {
         maxZoom: 22,
@@ -81,12 +81,44 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
           "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
       }
     );
+    // USGS NAIP aerial — public domain, US-only, often fresher/sharper than Esri
+    // over rural sites. Native tiles stop at z16; Leaflet upscales beyond that.
+    const naip = L.tileLayer(
+      "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}",
+      {
+        maxZoom: 22,
+        maxNativeZoom: 16,
+        attribution: "Imagery &copy; USGS The National Map (NAIP)",
+      }
+    );
     const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 22,
       attribution: "© OpenStreetMap contributors",
     });
-    satellite.addTo(map);
-    L.control.layers({ Satellite: satellite, Street: street }, undefined, { position: "topright" }).addTo(map);
+
+    const baseLayers: Record<string, L.TileLayer> = {
+      "Satellite (Esri)": esri,
+      "Aerial (NAIP, US)": naip,
+      Street: street,
+    };
+
+    // Mapbox Satellite — most consistent worldwide quality, but requires a token.
+    // Only offered when one is configured so we never render broken tiles.
+    const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+    if (mapboxToken) {
+      baseLayers["Satellite (Mapbox)"] = L.tileLayer(
+        `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${mapboxToken}`,
+        {
+          maxZoom: 22,
+          tileSize: 512,
+          zoomOffset: -1,
+          attribution: "© Mapbox © Maxar © OpenStreetMap",
+        }
+      );
+    }
+
+    esri.addTo(map);
+    L.control.layers(baseLayers, undefined, { position: "topright" }).addTo(map);
 
     const drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
