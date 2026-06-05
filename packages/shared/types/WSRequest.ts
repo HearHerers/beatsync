@@ -162,6 +162,9 @@ export const StreamMusicSchema = z.object({
   // sent as strings too). See TrackSchema.id in provider.ts.
   trackId: z.string(),
   trackName: z.string().optional(),
+  /** Route the streamed track into this playlist context (e.g. a shape.id in
+   * map rooms). Omitted = the room-wide "main" playlist (audio rooms). */
+  contextId: z.string().optional(),
 });
 
 export const SetGlobalVolumeSchema = z.object({

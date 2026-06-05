@@ -14,6 +14,7 @@
 //   - Chat / user list — those still live in Right / Left
 
 import { AudioUploaderMinimal } from "@/components/AudioUploaderMinimal";
+import { InlineSearch } from "@/components/dashboard/InlineSearch";
 import { Queue } from "@/components/Queue";
 import { Button } from "@/components/ui/button";
 import {
@@ -365,9 +366,11 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
           </div>
         </div>
 
-        {/* Uploader pinned above the queue */}
+        {/* Provider search + uploader pinned above the queue. Search streams the
+            chosen track straight into this zone's playlist (contextId). */}
         {canMutate && (
-          <div className="px-3 pt-3">
+          <div className="flex flex-col gap-2 px-3 pt-3">
+            <InlineSearch contextId={shape.id} />
             <AudioUploaderMinimal contextId={shape.id} label={`Upload to ${zoneDisplayName(shape)}`} />
           </div>
         )}
