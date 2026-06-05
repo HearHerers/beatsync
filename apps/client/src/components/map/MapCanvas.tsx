@@ -97,28 +97,30 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
       attribution: "© OpenStreetMap contributors",
     });
 
+    // Mapbox Satellite — most consistent worldwide quality, but requires a token.
+    // Only offered when one is configured so we never render broken tiles.
+    const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+    const mapbox = mapboxToken
+      ? L.tileLayer(
+          `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${mapboxToken}`,
+          {
+            maxZoom: 22,
+            tileSize: 512,
+            zoomOffset: -1,
+            attribution: "© Mapbox © Maxar © OpenStreetMap",
+          }
+        )
+      : null;
+
     const baseLayers: Record<string, L.TileLayer> = {
+      ...(mapbox ? { "Satellite (Mapbox)": mapbox } : {}),
       "Satellite (Esri)": esri,
       "Aerial (Michigan)": miAerial,
       Street: street,
     };
 
-    // Mapbox Satellite — most consistent worldwide quality, but requires a token.
-    // Only offered when one is configured so we never render broken tiles.
-    const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-    if (mapboxToken) {
-      baseLayers["Satellite (Mapbox)"] = L.tileLayer(
-        `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${mapboxToken}`,
-        {
-          maxZoom: 22,
-          tileSize: 512,
-          zoomOffset: -1,
-          attribution: "© Mapbox © Maxar © OpenStreetMap",
-        }
-      );
-    }
-
-    esri.addTo(map);
+    // Default to Mapbox when a token is configured (sharpest), else Esri.
+    (mapbox ?? esri).addTo(map);
     L.control.layers(baseLayers, undefined, { position: "topright" }).addTo(map);
 
     const drawnItems = new L.FeatureGroup();
