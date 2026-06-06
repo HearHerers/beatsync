@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CHAT_CONSTANTS, LOW_PASS_CONSTANTS, MAP_CONSTANTS } from "../constants";
-import { AudioSourceSchema, MapMetadataSchema, PositionSchema } from "./basic";
+import { AudioSourceSchema, MapMetadataSchema, MapTileLayerIdEnum, PositionSchema } from "./basic";
 import { ShapeSchema } from "./shape";
 
 // ROOM EVENTS
@@ -50,6 +50,7 @@ export const ClientActionEnum = z.enum([
   "SET_SHAPE_GROUP",
   "SET_MAP_METADATA",
   "SET_USERNAME",
+  "SET_DEFAULT_TILE_LAYER", // Admin sets the room-wide default base map
   "SET_GEO_POSITION", // Client GPS update
   "SET_VISIBILITY", // Tab visibility (hidden tabs still receive sync)
 ]);
@@ -273,6 +274,12 @@ export const SetUsernameSchema = z.object({
 });
 export type SetUsernameType = z.infer<typeof SetUsernameSchema>;
 
+export const SetDefaultTileLayerSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.SET_DEFAULT_TILE_LAYER),
+  tileLayerId: MapTileLayerIdEnum,
+});
+export type SetDefaultTileLayerType = z.infer<typeof SetDefaultTileLayerSchema>;
+
 export const SetGeoPositionSchema = z.object({
   type: z.literal(ClientActionEnum.enum.SET_GEO_POSITION),
   lat: z.number(),
@@ -321,6 +328,7 @@ export const WSRequestSchema = z.discriminatedUnion("type", [
   SetShapeGroupSchema,
   SetMapMetadataSchema,
   SetUsernameSchema,
+  SetDefaultTileLayerSchema,
   SetGeoPositionSchema,
   SetVisibilitySchema,
 ]);

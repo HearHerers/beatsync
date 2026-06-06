@@ -69,6 +69,7 @@ export const handleOpen = (ws: ServerWebSocket<WSData>, server: BunServer) => {
         type: "ROOM_TYPE_INFO",
         roomType: room.getRoomType(),
         ...(room.getMapMetadata() && { mapMetadata: room.getMapMetadata() }),
+        ...(room.getDefaultTileLayerId() && { defaultTileLayerId: room.getDefaultTileLayerId() }),
       },
     },
   });

@@ -28,6 +28,7 @@ import {
   handleAddShape,
   handleClearShapes,
   handleDeleteShape,
+  handleSetDefaultTileLayer,
   handleSetGeoPosition,
   handleSetMapMetadata,
   handleSetShapeFalloff,
@@ -187,6 +188,10 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.SET_USERNAME]: {
     handle: handleSetUsername,
     description: "Update the caller's own display name",
+  },
+  [ClientActionEnum.enum.SET_DEFAULT_TILE_LAYER]: {
+    handle: handleSetDefaultTileLayer,
+    description: "Set the room-wide default base map / tile layer",
   },
   [ClientActionEnum.enum.SET_GEO_POSITION]: {
     handle: handleSetGeoPosition,

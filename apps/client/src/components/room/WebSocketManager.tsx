@@ -204,8 +204,11 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
           // Authoritative room-type info from the server. Wins over the URL hint.
           useRoomStore.getState().setRoomType(event.roomType);
           if (event.mapMetadata) useRoomStore.getState().setMapMetadata(event.mapMetadata);
+          if (event.defaultTileLayerId) useRoomStore.getState().setDefaultTileLayerId(event.defaultTileLayerId);
         } else if (event.type === "MAP_METADATA_UPDATE") {
           useRoomStore.getState().setMapMetadata(event.metadata);
+        } else if (event.type === "DEFAULT_TILE_LAYER_UPDATE") {
+          useRoomStore.getState().setDefaultTileLayerId(event.tileLayerId);
         } else if (event.type === "SHAPES_UPDATE") {
           useMapStore.getState().setShapes(event.shapes);
         } else if (event.type === "PLAYLISTS_UPDATE") {

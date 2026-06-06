@@ -60,10 +60,11 @@ export class BackupManager {
 
       room.restorePlaylists(restoredPlaylists);
       room.restoreClientData(roomData.clientDatas);
-      if (roomData.roomType || roomData.mapMetadata || roomData.shapes) {
+      if (roomData.roomType || roomData.mapMetadata || roomData.defaultTileLayerId || roomData.shapes) {
         room.restoreMapState({
           roomType: roomData.roomType,
           mapMetadata: roomData.mapMetadata,
+          defaultTileLayerId: roomData.defaultTileLayerId,
           shapes: roomData.shapes,
         });
       }

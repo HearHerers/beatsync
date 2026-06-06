@@ -34,6 +34,12 @@ export const MapMetadataSchema = z.object({
 });
 export type MapMetadataType = z.infer<typeof MapMetadataSchema>;
 
+// Selectable base-map tile layers for map rooms. The admin-chosen default is
+// synced room-wide; the actual tile URLs live client-side (see MapCanvas). The
+// "mapbox" layer needs a build-time token — clients without one fall back to esri.
+export const MapTileLayerIdEnum = z.enum(["mapbox", "esri", "michigan", "street"]);
+export type MapTileLayerId = z.infer<typeof MapTileLayerIdEnum>;
+
 export const AudioSourceSchema = z.object({
   url: z.string(),
 });
