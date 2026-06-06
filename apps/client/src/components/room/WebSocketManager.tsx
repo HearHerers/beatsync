@@ -354,9 +354,15 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
       stopHeartbeat();
       ws.close();
     };
-    // Not including socket in the dependency array because it will trigger the close when it's set
+    // Not including socket in the dependency array because it will trigger the close when it's set.
+    // Deliberately NOT including `username` either: an in-room rename (SET_USERNAME) updates
+    // useRoomStore.username, and if that were a dependency this effect's cleanup would tear down
+    // the live socket — killing the connection before the server's CLIENT_CHANGE broadcast arrives,
+    // so the rename would never visually apply. username is only read when building the initial
+    // join URL (the connect is gated by roomId/isLoadingRoom, which settle after username is set),
+    // and the server persists renames across reconnects, so a live change must not reconnect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoadingRoom, roomId, username, clientId]);
+  }, [isLoadingRoom, roomId, clientId]);
 
   return null; // This is a non-visual component
 };

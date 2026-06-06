@@ -1625,6 +1625,18 @@ export class RoomManager {
     return true;
   }
 
+  /** Update a client's display name. Trimmed + length-capped. Returns false on
+   *  unknown client or empty result. */
+  setClientUsername(clientId: string, username: string): boolean {
+    const client = this.clientData.get(clientId);
+    if (!client) return false;
+    const trimmed = username.trim().slice(0, 40);
+    if (trimmed.length === 0) return false;
+    client.username = trimmed;
+    this.clientData.set(clientId, client);
+    return true;
+  }
+
   /** Restore per-context playlists from a backup. Falls back gracefully when
    *  the backup predates the playlist concept (only `audioSources` +
    *  `playbackState` available). */
