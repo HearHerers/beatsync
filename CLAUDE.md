@@ -123,5 +123,5 @@ S3_SECRET_ACCESS_KEY=
 - No testing framework on the client; server uses `bun test` with sinon for stubs
 - Server uses native `Bun.serve()` with URL pathname switch routing (not Hono's router)
 - Room IDs are 6-digit codes
-- Room cleanup: 60s after last client disconnects, room is deleted
-- Admin auto-promotion: if last admin leaves, a random client is promoted
+- **Rooms are permanent (non-demo).** Room state and uploaded R2 audio are NEVER auto-deleted — not on disconnect, not on restart, not by startup orphan-cleanup. Deletion is explicit only (`bun run cleanup:live`). On last disconnect the room releases per-room intervals and backs up, but stays resident. Persisted state (R2 backups, every 60s + on last disconnect) is authoritative and restored before the server accepts connections. Only the **demo** room (`IS_DEMO_MODE`) is ephemeral (60s cleanup + delete).
+- **Admin is a recoverable per-room token**, not first-joiner-wins. The first connector to a brand-new room becomes admin and mints the token (handed to that client via `SET_ADMIN_TOKEN`, stored in `localStorage`, re-presented on connect as `?roomAdminToken=`). Anyone presenting the token becomes a co-curator; everyone else is a listener. No random promotion when an admin leaves. Recover a lost token server-side with `bun run room:admin-token <roomId>`.

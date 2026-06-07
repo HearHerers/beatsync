@@ -20,9 +20,19 @@ export const MusicSearchResponseSchema = z.object({
 });
 export type MusicSearchResponseType = z.infer<typeof MusicSearchResponseSchema>;
 
+// Sent privately to a client the server recognizes as the room's admin, so the
+// client can persist the recoverable admin token (localStorage) and re-present
+// it on future connects / share it to grant co-curator access.
+export const SetAdminTokenSchema = z.object({
+  type: z.literal("SET_ADMIN_TOKEN"),
+  token: z.string(),
+});
+export type SetAdminTokenType = z.infer<typeof SetAdminTokenSchema>;
+
 export const WSUnicastSchema = z.discriminatedUnion("type", [
   NTPResponseMessageSchema,
   ScheduledActionSchema,
   MusicSearchResponseSchema,
+  SetAdminTokenSchema,
 ]);
 export type WSUnicastType = z.infer<typeof WSUnicastSchema>;
