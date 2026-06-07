@@ -13,6 +13,24 @@ import { handleClose, handleMessage, handleOpen } from "@/routes/websocketHandle
 import { corsHeaders, errorResponse } from "@/utils/responses";
 import type { WSData } from "@/utils/websocket";
 
+// Whether R2 (durable state) is configured. Computed once and reused for the
+// post-listen periodic backup.
+const r2Valid = !IS_DEMO_MODE && validateR2Config().isValid;
+
+// Restore persisted state BEFORE accepting any connections. Otherwise a client
+// could connect during the async restore window and hit a not-yet-restored
+// (empty) room — recreating it fresh and clobbering durable state. Rooms are
+// permanent, so getting this right matters.
+if (r2Valid) {
+  try {
+    await BackupManager.restoreState();
+  } catch (error) {
+    console.error("Failed to restore state on startup:", error);
+  }
+} else if (!IS_DEMO_MODE) {
+  console.log("ℹ️  R2 not configured; skipping state restore (state will not persist).");
+}
+
 // Bun.serve with WebSocket support
 const server = Bun.serve<WSData>({
   hostname: "0.0.0.0",
@@ -87,27 +105,14 @@ if (IS_DEMO_MODE) {
   console.log(`🔑 Admin secret: ${ADMIN_SECRET}`);
 }
 
-if (!IS_DEMO_MODE) {
-  // Restore + periodic-backup only when R2 is actually configured. Local dev
-  // without S3 credentials would otherwise log a fresh "❌ Failed to perform
-  // periodic backup" every 60 seconds — pure noise, since there's no R2 to
-  // talk to and restore is a no-op anyway.
-  const r2 = validateR2Config();
-  if (r2.isValid) {
-    BackupManager.restoreState().catch((error) => {
-      console.error("Failed to restore state on startup:", error);
+if (r2Valid) {
+  // Periodic safety-net backup (restore already ran before listen, above).
+  const BACKUP_INTERVAL_MS = 60 * 1000;
+  setInterval(() => {
+    BackupManager.backupState().catch((error) => {
+      console.error("Failed to perform periodic backup:", error);
     });
-
-    // Set up periodic backups every minute (for Render persistence issues)
-    const BACKUP_INTERVAL_MS = 60 * 1000;
-    setInterval(() => {
-      BackupManager.backupState().catch((error) => {
-        console.error("Failed to perform periodic backup:", error);
-      });
-    }, BACKUP_INTERVAL_MS);
-  } else {
-    console.log(`ℹ️  R2 not configured (missing: ${r2.errors.join(", ")}); skipping state backup/restore.`);
-  }
+  }, BACKUP_INTERVAL_MS);
 }
 
 // Simple graceful shutdown

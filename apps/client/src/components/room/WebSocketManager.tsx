@@ -1,4 +1,5 @@
 "use client";
+import { getAdminToken, setAdminToken } from "@/lib/adminToken";
 import { useClientId } from "@/hooks/useClientId";
 import { useNtpHeartbeat } from "@/hooks/useNtpHeartbeat";
 import { useWebSocketReconnection } from "@/hooks/useWebSocketReconnection";
@@ -102,7 +103,11 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
   const roomTypeParam = requestedRoomType ? `&roomType=${encodeURIComponent(requestedRoomType)}` : "";
 
   const createConnection = () => {
-    const SOCKET_URL = `${getWsUrl()}?roomId=${roomId}&username=${username}&clientId=${clientId}${adminParam}${creatorParam}${roomTypeParam}`;
+    // Re-read the room's admin token each connect — it may have just been issued
+    // (SET_ADMIN_TOKEN) so a reconnect re-presents it and keeps the curator admin.
+    const roomAdminToken = roomId ? getAdminToken(roomId) : null;
+    const adminTokenParam = roomAdminToken ? `&roomAdminToken=${encodeURIComponent(roomAdminToken)}` : "";
+    const SOCKET_URL = `${getWsUrl()}?roomId=${roomId}&username=${username}&clientId=${clientId}${adminParam}${creatorParam}${roomTypeParam}${adminTokenParam}`;
     console.log("Creating new WS connection to", SOCKET_URL);
 
     // Clear previous connection if it exists
@@ -179,6 +184,9 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
 
         // Mark that we received an NTP response (for staleness detection)
         markNTPResponseReceived();
+      } else if (response.type === "SET_ADMIN_TOKEN") {
+        // Persist the recoverable admin token so we re-present it on reconnect.
+        if (roomId) setAdminToken(roomId, response.token);
       } else if (response.type === "ROOM_EVENT") {
         const { event } = response;
         console.log("Room event:", event);
@@ -204,8 +212,11 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
           // Authoritative room-type info from the server. Wins over the URL hint.
           useRoomStore.getState().setRoomType(event.roomType);
           if (event.mapMetadata) useRoomStore.getState().setMapMetadata(event.mapMetadata);
+          if (event.defaultTileLayerId) useRoomStore.getState().setDefaultTileLayerId(event.defaultTileLayerId);
         } else if (event.type === "MAP_METADATA_UPDATE") {
           useRoomStore.getState().setMapMetadata(event.metadata);
+        } else if (event.type === "DEFAULT_TILE_LAYER_UPDATE") {
+          useRoomStore.getState().setDefaultTileLayerId(event.tileLayerId);
         } else if (event.type === "SHAPES_UPDATE") {
           useMapStore.getState().setShapes(event.shapes);
         } else if (event.type === "PLAYLISTS_UPDATE") {
@@ -367,9 +378,15 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
       stopHeartbeat();
       ws.close();
     };
-    // Not including socket in the dependency array because it will trigger the close when it's set
+    // Not including socket in the dependency array because it will trigger the close when it's set.
+    // Deliberately NOT including `username` either: an in-room rename (SET_USERNAME) updates
+    // useRoomStore.username, and if that were a dependency this effect's cleanup would tear down
+    // the live socket — killing the connection before the server's CLIENT_CHANGE broadcast arrives,
+    // so the rename would never visually apply. username is only read when building the initial
+    // join URL (the connect is gated by roomId/isLoadingRoom, which settle after username is set),
+    // and the server persists renames across reconnects, so a live change must not reconnect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoadingRoom, roomId, username, clientId]);
+  }, [isLoadingRoom, roomId, clientId]);
 
   return null; // This is a non-visual component
 };
