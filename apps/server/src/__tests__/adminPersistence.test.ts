@@ -31,13 +31,13 @@ describe("Admin Persistence", () => {
     expect(clients[0].clientId).toBe("client-1");
   });
 
-  it("should promote a random client when the only admin leaves", () => {
+  it("does NOT promote a random client when the only admin leaves (no hijack)", () => {
     const ws1 = createMockWs({ clientId: "client-1", username: "admin-user", roomId: roomId });
     const ws2 = createMockWs({ clientId: "client-2", username: "user2", roomId: roomId });
     const ws3 = createMockWs({ clientId: "client-3", username: "user3", roomId: roomId });
 
     // Add clients in order
-    room.addClient(ws1); // Admin
+    room.addClient(ws1); // Admin (first connector + mints token)
     room.addClient(ws2);
     room.addClient(ws3);
 
@@ -50,12 +50,29 @@ describe("Admin Persistence", () => {
     // Admin leaves
     room.removeClient("client-1");
 
-    // Check that exactly one remaining client was promoted (random selection)
+    // Admin is a recoverable token now — remaining clients stay listeners.
     clients = room.getClients();
     expect(clients.length).toBe(2);
-    const admins = clients.filter((c) => c.isAdmin);
-    expect(admins.length).toBe(1);
-    expect(["client-2", "client-3"]).toContain(admins[0].clientId);
+    expect(clients.every((c) => !c.isAdmin)).toBe(true);
+  });
+
+  it("grants admin to a client presenting the room's admin token", () => {
+    const ws1 = createMockWs({ clientId: "client-1", username: "creator", roomId: roomId });
+    room.addClient(ws1); // creator becomes admin and mints the token
+
+    const token = room.getAdminToken();
+    expect(token).toBeTruthy();
+    expect(room.getClient("client-1")?.isAdmin).toBe(true);
+
+    // A different client presenting the token becomes a co-curator (admin).
+    const ws2 = createMockWs({ clientId: "client-2", username: "sweetie", roomId: roomId, roomAdminToken: token });
+    room.addClient(ws2);
+    expect(room.getClient("client-2")?.isAdmin).toBe(true);
+
+    // A client without the token is a listener.
+    const ws3 = createMockWs({ clientId: "client-3", username: "guest", roomId: roomId });
+    room.addClient(ws3);
+    expect(room.getClient("client-3")?.isAdmin).toBe(false);
   });
 
   it("should preserve admin status and username when client rejoins with same ID", () => {
@@ -71,25 +88,22 @@ describe("Admin Persistence", () => {
     expect(clients.find((c) => c.clientId === "client-1")?.isAdmin).toBe(true);
     expect(clients.find((c) => c.clientId === "client-1")?.username).toBe("admin-user");
 
-    // Admin disconnects
+    // Admin disconnects — no random promotion, client-2 stays a listener.
     room.removeClient("client-1");
-
-    // Verify admin is gone but client-2 becomes admin
     clients = room.getClients();
     expect(clients.length).toBe(1);
-    expect(clients.find((c) => c.clientId === "client-2")?.isAdmin).toBe(true);
+    expect(clients.find((c) => c.clientId === "client-2")?.isAdmin).toBe(false);
 
-    // Original admin rejoins with same clientId
+    // Original admin rejoins with same clientId — admin restored from cache.
     const ws1Reconnect = createMockWs({ clientId: "client-1", username: "admin-user", roomId: roomId });
     room.addClient(ws1Reconnect);
 
-    // Verify admin status is restored
     clients = room.getClients();
     expect(clients.length).toBe(2);
     expect(clients.find((c) => c.clientId === "client-1")?.isAdmin).toBe(true);
     expect(clients.find((c) => c.clientId === "client-1")?.username).toBe("admin-user");
-    // Client-2 should still be admin too (both can be admin)
-    expect(clients.find((c) => c.clientId === "client-2")?.isAdmin).toBe(true);
+    // Client-2 remains a listener — admin isn't handed out on disconnect.
+    expect(clients.find((c) => c.clientId === "client-2")?.isAdmin).toBe(false);
   });
 
   it("should keep non-admin as non-admin when rejoining", () => {
@@ -153,7 +167,7 @@ describe("Admin Persistence", () => {
     expect(clients.find((c) => c.clientId === "client-2")?.isAdmin).toBe(true);
   });
 
-  it("should allow original admin to reclaim status after another was promoted", () => {
+  it("lets the original admin reclaim admin on rejoin (no one else is promoted)", () => {
     const ws1 = createMockWs({ clientId: "client-1", username: "original-admin", roomId: roomId });
     const ws2 = createMockWs({ clientId: "client-2", username: "user2", roomId: roomId });
 
@@ -161,20 +175,18 @@ describe("Admin Persistence", () => {
     room.addClient(ws1);
     room.addClient(ws2);
 
-    // Admin leaves, user2 gets promoted
+    // Admin leaves — user2 is NOT promoted (admin is a recoverable token now).
     room.removeClient("client-1");
-
     let clients = room.getClients();
-    expect(clients.find((c) => c.clientId === "client-2")?.isAdmin).toBe(true);
+    expect(clients.find((c) => c.clientId === "client-2")?.isAdmin).toBe(false);
 
-    // Original admin returns
+    // Original admin returns and reclaims admin from cache.
     const ws1Reconnect = createMockWs({ clientId: "client-1", username: "original-admin", roomId: roomId });
     room.addClient(ws1Reconnect);
 
-    // Both should be admins now
     clients = room.getClients();
     expect(clients.find((c) => c.clientId === "client-1")?.isAdmin).toBe(true);
-    expect(clients.find((c) => c.clientId === "client-2")?.isAdmin).toBe(true);
+    expect(clients.find((c) => c.clientId === "client-2")?.isAdmin).toBe(false);
   });
 
   it("should preserve client data even without active connection", () => {
