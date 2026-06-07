@@ -35,6 +35,7 @@ import {
   handleAddShape,
   handleClearShapes,
   handleDeleteShape,
+  handleSetDefaultTileLayer,
   handleSetGeoPosition,
   handleSetMapMetadata,
   handleSetShapeFalloff,
@@ -273,6 +274,36 @@ describe("handleSetMapMetadata", () => {
     if (ev.type !== "MAP_METADATA_UPDATE") throw new Error("unreachable");
     expect(ev.metadata).toEqual({ center: [10, 20], zoom: 15 });
     expect(room.getMapMetadata()).toEqual({ center: [10, 20], zoom: 15 });
+  });
+});
+
+describe("handleSetDefaultTileLayer", () => {
+  it("updates state and broadcasts DEFAULT_TILE_LAYER_UPDATE", () => {
+    const { room, adminWs, server } = freshMapRoom();
+    void handleSetDefaultTileLayer({
+      ws: adminWs,
+      message: { type: "SET_DEFAULT_TILE_LAYER", tileLayerId: "michigan" },
+      server,
+    });
+    const ev = lastEventOfType("DEFAULT_TILE_LAYER_UPDATE");
+    if (ev.type !== "DEFAULT_TILE_LAYER_UPDATE") throw new Error("unreachable");
+    expect(ev.tileLayerId).toBe("michigan");
+    expect(room.getDefaultTileLayerId()).toBe("michigan");
+  });
+
+  it("rejects non-admin in ADMIN_ONLY rooms with no broadcast", () => {
+    const { room, server } = freshMapRoom();
+    const visitorWs = createMockWs({ clientId: "visitor-1", roomId: room.getRoomId() });
+    room.addClient(visitorWs);
+    expect(() =>
+      handleSetDefaultTileLayer({
+        ws: visitorWs,
+        message: { type: "SET_DEFAULT_TILE_LAYER", tileLayerId: "street" },
+        server,
+      })
+    ).toThrow(/permission/);
+    expect(broadcasts).toHaveLength(0);
+    expect(room.getDefaultTileLayerId()).toBeUndefined();
   });
 });
 

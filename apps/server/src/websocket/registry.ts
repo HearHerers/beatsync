@@ -22,11 +22,13 @@ import { handleSetMetronome } from "@/websocket/handlers/setMetronome";
 import { handleSetLowPassFreq } from "@/websocket/handlers/setLowPassFreq";
 import { handleSetContextLoop } from "@/websocket/handlers/setContextLoop";
 import { handleAddTrackToContext, handleRemoveTrackFromContext } from "@/websocket/handlers/contextTracks";
+import { handleSetUsername } from "@/websocket/handlers/setUsername";
 import { handleSync } from "@/websocket/handlers/sync";
 import {
   handleAddShape,
   handleClearShapes,
   handleDeleteShape,
+  handleSetDefaultTileLayer,
   handleSetGeoPosition,
   handleSetMapMetadata,
   handleSetShapeFalloff,
@@ -187,6 +189,14 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.SET_MAP_METADATA]: {
     handle: handleSetMapMetadata,
     description: "Update the room's default Leaflet center/zoom",
+  },
+  [ClientActionEnum.enum.SET_USERNAME]: {
+    handle: handleSetUsername,
+    description: "Update the caller's own display name",
+  },
+  [ClientActionEnum.enum.SET_DEFAULT_TILE_LAYER]: {
+    handle: handleSetDefaultTileLayer,
+    description: "Set the room-wide default base map / tile layer",
   },
   [ClientActionEnum.enum.SET_GEO_POSITION]: {
     handle: handleSetGeoPosition,
