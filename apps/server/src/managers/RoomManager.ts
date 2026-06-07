@@ -101,6 +101,8 @@ const RoomBackupSchema = z.object({
   mapMetadata: MapMetadataSchema.optional(),
   defaultTileLayerId: MapTileLayerIdEnum.optional(),
   shapes: z.array(ShapeSchema).optional(),
+  /** Recoverable per-room admin token (non-demo). */
+  adminToken: z.string().optional(),
 });
 export type RoomBackupType = z.infer<typeof RoomBackupSchema>;
 
@@ -213,6 +215,10 @@ export class RoomManager {
   private heartbeatCheckInterval?: NodeJS.Timeout;
   private onClientCountChange?: () => void;
   private playbackControlsPermissions: PlaybackControlsPermissionsType = "ADMIN_ONLY";
+  // Recoverable per-room admin token (non-demo). Minted the first time the room
+  // gets a client; the creator is granted admin and handed this token. Anyone
+  // presenting it later becomes a co-curator. Persisted in backups.
+  private adminToken?: string;
   private globalVolume = 1.0;
   private lowPassFreq: number = LOW_PASS_CONSTANTS.MAX_FREQ; // Default bypassed (full spectrum)
   private isMetronomeEnabled = false;
@@ -492,17 +498,25 @@ export class RoomManager {
       clientData.nudgeMs = cachedClient.nudgeMs;
     }
 
-    // In demo mode, only the admin secret grants admin. Otherwise, the first
-    // client to ever join the room gets admin. We check clientData (not
-    // wsConnections) so that a new joiner doesn't get promoted just because the
-    // original admin disconnected — cached admin data is preserved for rejoin,
-    // and removeClient handles auto-promotion when an admin leaves with others
-    // still present.
-    if (!IS_DEMO_MODE && this.clientData.size === 0) {
-      clientData.isAdmin = true;
+    // Admin model (non-demo): admin is a recoverable per-room token, NOT
+    // first-joiner-wins. Mint the token the first time the room is used; the
+    // very first connector is the creator and gets admin. Anyone presenting the
+    // matching token thereafter is granted admin (co-curator). Cached admin
+    // (same clientId rejoining) is already restored above. Rooms are permanent,
+    // so a token, once minted, persists — "first connector" can't be hijacked
+    // by a later visitor after the room is recreated, because it never is.
+    if (!IS_DEMO_MODE) {
+      const isFirstEverConnector = this.clientData.size === 0;
+      if (!this.adminToken) {
+        this.adminToken = crypto.randomUUID();
+        if (isFirstEverConnector) clientData.isAdmin = true;
+      }
+      if (ws.data.roomAdminToken && ws.data.roomAdminToken === this.adminToken) {
+        clientData.isAdmin = true;
+      }
     }
 
-    // If the client authenticated with the admin secret or is the creator, always grant admin
+    // If the client authenticated with the demo admin secret or is the creator, always grant admin
     if (ws.data.isAdmin || ws.data.isCreator) {
       clientData.isAdmin = true;
     }
@@ -532,27 +546,11 @@ export class RoomManager {
     const activeClients = this.getClients();
     // Reposition remaining clients if any
     if (activeClients.length > 0) {
-      // Always check to ensure there is at least one admin
       positionClientsInCircle(activeClients);
-
-      // Check if any admins remain after removing this client
-      // In demo mode, skip auto-promotion — only the admin secret grants admin
-      if (!IS_DEMO_MODE) {
-        const remainingAdmins = activeClients.filter((client) => client.isAdmin);
-
-        if (remainingAdmins.length === 0) {
-          const randomIndex = Math.floor(Math.random() * activeClients.length);
-          const newAdmin = activeClients[randomIndex];
-
-          if (newAdmin) {
-            newAdmin.isAdmin = true;
-            this.clientData.set(newAdmin.clientId, newAdmin);
-            console.log(
-              `✨ Automatically promoted ${newAdmin.username} (${newAdmin.clientId}) to admin in room ${this.roomId}`
-            );
-          }
-        }
-      }
+      // NOTE: no random admin auto-promotion. Admin is a recoverable per-room
+      // token (see addClient); a curated room must never hand control to a
+      // random visitor just because the curator's tab dropped. The curator
+      // reclaims admin via their cached clientId or the room's admin token.
     } else {
       // Stop heartbeat checking if no clients remain
       this.stopHeartbeatChecking();
@@ -1171,7 +1169,18 @@ export class RoomManager {
       ...(this.mapMetadata && { mapMetadata: this.mapMetadata }),
       ...(this.defaultTileLayerId && { defaultTileLayerId: this.defaultTileLayerId }),
       ...(this.shapes.size > 0 && { shapes: Array.from(this.shapes.values()) }),
+      ...(this.adminToken && { adminToken: this.adminToken }),
     };
+  }
+
+  /** Restore the recoverable admin token from a backup (non-demo rooms). */
+  restoreAdminToken(token: string): void {
+    this.adminToken = token;
+  }
+
+  /** The room's admin token, if minted. Used by the recovery script + connect unicast. */
+  getAdminToken(): string | undefined {
+    return this.adminToken;
   }
 
   /** Restore map-room state from a backup. */

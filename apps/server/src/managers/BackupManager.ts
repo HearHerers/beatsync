@@ -1,6 +1,5 @@
 import pLimit from "p-limit";
 import {
-  cleanupOrphanedRooms,
   deleteObject,
   downloadJSON,
   getLatestFileWithPrefix,
@@ -60,6 +59,7 @@ export class BackupManager {
 
       room.restorePlaylists(restoredPlaylists);
       room.restoreClientData(roomData.clientDatas);
+      if (roomData.adminToken) room.restoreAdminToken(roomData.adminToken);
       if (roomData.roomType || roomData.mapMetadata || roomData.defaultTileLayerId || roomData.shapes) {
         room.restoreMapState({
           roomType: roomData.roomType,
@@ -74,8 +74,8 @@ export class BackupManager {
         console.log(`Room ${roomId}: Restored ${roomData.chat.messages.length} chat messages`);
       }
 
-      // Always schedule cleanup on restoration because we don't know if any clients will reconnect.
-      globalManager.scheduleRoomCleanup(roomId);
+      // Rooms are permanent (non-demo): keep restored rooms resident even with no
+      // clients. We do NOT schedule cleanup here — deletion is explicit only.
       const totalTracks = restoredPlaylists.reduce((n, p) => n + p.tracks.length, 0);
       return {
         room: {
@@ -161,10 +161,8 @@ export class BackupManager {
 
       if (!latestBackupKey) {
         console.log("📭 No backups found");
-
-        // Still clean up orphaned rooms even if no backup exists
-        await this.cleanupOrphanedRooms();
-
+        // No automatic orphan deletion: room audio is permanent and only removed
+        // by an explicit `bun run cleanup:live`. See routes/cleanup.ts.
         return false;
       }
 
@@ -239,9 +237,8 @@ export class BackupManager {
         });
       }
 
-      // Clean up orphaned rooms after state restore
-      await this.cleanupOrphanedRooms();
-
+      // No automatic orphan deletion after restore: room audio is permanent and
+      // only removed by an explicit `bun run cleanup:live`. See routes/cleanup.ts.
       return true;
     } catch (error) {
       console.error("❌ State restore failed:", error);
@@ -278,21 +275,6 @@ export class BackupManager {
     } catch (error) {
       // Don't throw - cleanup failures shouldn't break the backup process
       console.error("⚠️ Backup cleanup failed (non-critical):", error);
-    }
-  }
-
-  /**
-   * Clean up orphaned rooms that exist in R2 but not in server memory
-   */
-  static async cleanupOrphanedRooms(): Promise<void> {
-    try {
-      console.log("🧹 Cleaning up orphaned rooms...");
-
-      const activeRooms = new Set<string>(globalManager.getRoomIds());
-      await cleanupOrphanedRooms(activeRooms, true);
-    } catch (error) {
-      // Don't throw - cleanup failures shouldn't break the restore process
-      console.error("⚠️ Orphaned room cleanup failed:", error);
     }
   }
 }

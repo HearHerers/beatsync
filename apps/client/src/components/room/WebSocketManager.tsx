@@ -1,4 +1,5 @@
 "use client";
+import { getAdminToken, setAdminToken } from "@/lib/adminToken";
 import { useClientId } from "@/hooks/useClientId";
 import { useNtpHeartbeat } from "@/hooks/useNtpHeartbeat";
 import { useWebSocketReconnection } from "@/hooks/useWebSocketReconnection";
@@ -102,7 +103,11 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
   const roomTypeParam = requestedRoomType ? `&roomType=${encodeURIComponent(requestedRoomType)}` : "";
 
   const createConnection = () => {
-    const SOCKET_URL = `${getWsUrl()}?roomId=${roomId}&username=${username}&clientId=${clientId}${adminParam}${creatorParam}${roomTypeParam}`;
+    // Re-read the room's admin token each connect — it may have just been issued
+    // (SET_ADMIN_TOKEN) so a reconnect re-presents it and keeps the curator admin.
+    const roomAdminToken = roomId ? getAdminToken(roomId) : null;
+    const adminTokenParam = roomAdminToken ? `&roomAdminToken=${encodeURIComponent(roomAdminToken)}` : "";
+    const SOCKET_URL = `${getWsUrl()}?roomId=${roomId}&username=${username}&clientId=${clientId}${adminParam}${creatorParam}${roomTypeParam}${adminTokenParam}`;
     console.log("Creating new WS connection to", SOCKET_URL);
 
     // Clear previous connection if it exists
@@ -179,6 +184,9 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
 
         // Mark that we received an NTP response (for staleness detection)
         markNTPResponseReceived();
+      } else if (response.type === "SET_ADMIN_TOKEN") {
+        // Persist the recoverable admin token so we re-present it on reconnect.
+        if (roomId) setAdminToken(roomId, response.token);
       } else if (response.type === "ROOM_EVENT") {
         const { event } = response;
         console.log("Room event:", event);
