@@ -12,6 +12,7 @@ export const handleWebSocketUpgrade = (req: Request, server: BunServer) => {
   const clientId = url.searchParams.get("clientId");
   const adminSecret = url.searchParams.get("admin");
   const creatorSecret = url.searchParams.get("creator");
+  const roomAdminToken = url.searchParams.get("roomAdminToken") ?? undefined;
   const roomTypeParam = url.searchParams.get("roomType");
   // Map rooms are opt-in via ?roomType=map. Unrecognized values are ignored so the
   // first client falls back to the default "audio" type.
@@ -49,6 +50,7 @@ export const handleWebSocketUpgrade = (req: Request, server: BunServer) => {
     clientId,
     isAdmin,
     isCreator,
+    roomAdminToken,
     requestedRoomType,
   };
 
