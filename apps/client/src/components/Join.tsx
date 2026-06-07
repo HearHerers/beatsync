@@ -8,7 +8,7 @@ import { validateFullRoomId, validatePartialRoomId } from "@/lib/room";
 import { useRoomStore } from "@/store/room";
 import { useQuery } from "@tanstack/react-query";
 import { Map, PlusCircle } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
@@ -195,46 +195,35 @@ export const Join = () => {
             )}
 
             <motion.div
-              className="flex items-center justify-center mt-5"
+              className="flex flex-col gap-1.5 mt-5"
               initial={{ opacity: 0, y: 5 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.25 }}
             >
-              <div className="text-sm text-neutral-400">
-                You&apos;ll join as{" "}
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.span
-                    key={username}
-                    className="text-primary font-medium inline-block"
-                    initial={{
-                      opacity: 0,
-                      filter: "blur(8px)",
-                    }}
-                    animate={{
-                      opacity: 1,
-                      filter: "blur(0px)",
-                    }}
-                    exit={{
-                      opacity: 0,
-                      filter: "blur(8px)",
-                    }}
-                    transition={{
-                      duration: 0.2,
-                    }}
-                  >
-                    {username}
-                  </motion.span>
-                </AnimatePresence>
+              <label htmlFor="join-username" className="text-xs text-neutral-500 self-start">
+                You&apos;ll join as
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  id="join-username"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  maxLength={40}
+                  className="flex-1 bg-neutral-950 border border-neutral-700 rounded px-2 py-1 text-sm text-primary font-medium outline-none focus:border-neutral-500"
+                  disabled={isJoining || isCreating}
+                  placeholder="Pick a name (spaces ok)"
+                />
+                <Button
+                  type="button"
+                  onClick={handleRegenerateName}
+                  variant="ghost"
+                  className="text-xs text-neutral-500 hover:text-neutral-300 h-7 px-2"
+                  disabled={isJoining || isCreating}
+                >
+                  Regenerate
+                </Button>
               </div>
-              <Button
-                type="button"
-                onClick={handleRegenerateName}
-                variant="ghost"
-                className="text-xs text-neutral-500 hover:text-neutral-300 ml-2 h-6 px-2"
-                disabled={isJoining || isCreating}
-              >
-                Regenerate
-              </Button>
             </motion.div>
 
             <div className="flex flex-col gap-3 mt-5">

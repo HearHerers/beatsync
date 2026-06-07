@@ -118,6 +118,24 @@ export const handleSetMapMetadata: HandlerFunction<ExtractWSRequestFrom["SET_MAP
   });
 };
 
+export const handleSetDefaultTileLayer: HandlerFunction<ExtractWSRequestFrom["SET_DEFAULT_TILE_LAYER"]> = ({
+  ws,
+  message,
+  server,
+}) => {
+  const { room } = requireCanMutate(ws);
+  if (!room.isMapRoom()) return;
+  room.setDefaultTileLayer(message.tileLayerId);
+  sendBroadcast({
+    server,
+    roomId: room.getRoomId(),
+    message: {
+      type: "ROOM_EVENT",
+      event: { type: "DEFAULT_TILE_LAYER_UPDATE", tileLayerId: message.tileLayerId },
+    },
+  });
+};
+
 // ── Client presence (participation, not curation) ──────────────────
 
 export const handleSetGeoPosition: HandlerFunction<ExtractWSRequestFrom["SET_GEO_POSITION"]> = ({
