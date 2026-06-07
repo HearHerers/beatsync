@@ -217,3 +217,14 @@
   --color-primary-900: oklch(39.25% 0.0896 152.54);
   --color-primary-950: oklch(26.64% 0.0628 152.93);
 }
+
+/* Map rooms: Leaflet's layer switcher lives in the top-right corner, which is
+   also where the Manual/GPS overlay sits (absolute top-2 right-2, h-7 buttons).
+   Drop the top-right control stack below that row, leaving a vertical gap equal
+   to the buttons' own gap-1 so the spacing reads as harmonious:
+     picker top = top-2 (0.5) + h-7 (1.75) + gap-1 (0.25) = 2.5rem
+   Leaflet already adds margin-top:10px (0.625rem) to the control, so the
+   container offset is 2.5 - 0.625 = 1.875rem. */
+.leaflet-top.leaflet-right {
+  margin-top: 1.875rem;
+}

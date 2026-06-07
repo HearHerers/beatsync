@@ -127,6 +127,41 @@ describe("handleClose", () => {
     expect(event.event.clients[0].clientId).toBe("client-3");
   });
 
+  it("keeps a non-demo room and its zones alive long after the last client disconnects", () => {
+    // Regression guard for the durable-rooms invariant: a curated room (and its
+    // shapes/audio) must NEVER be auto-deleted when everyone disconnects.
+    const room = globalManager.getOrCreateRoom(ROOM_ID);
+    room.setRoomType("map"); // must be set before any client joins
+    const ws = createMockWs({ clientId: "client-1", roomId: ROOM_ID });
+    handleOpen(ws, server);
+
+    room.addShape({
+      id: "zone-1",
+      type: "polygon",
+      coordinates: [
+        [
+          [42.28, -83.74],
+          [42.281, -83.74],
+          [42.281, -83.741],
+        ],
+      ],
+      createdBy: "client-1",
+      createdAt: 0,
+      groupId: null,
+      falloffMeters: 25,
+    });
+
+    handleClose(ws, server);
+    expect(room.hasActiveConnections()).toBe(false);
+
+    // Advance WELL past the legacy 60s cleanup window.
+    clock.tick(5 * 60 * 1000);
+
+    // Room is permanent: still present, still holding its zone.
+    expect(globalManager.hasRoom(ROOM_ID)).toBe(true);
+    expect(globalManager.getRoom(ROOM_ID)!.getShapes()).toHaveLength(1);
+  });
+
   it("should not schedule cleanup when other clients remain", () => {
     const ws1 = createMockWs({ clientId: "client-1", roomId: ROOM_ID });
     const ws2 = createMockWs({ clientId: "client-2", roomId: ROOM_ID });

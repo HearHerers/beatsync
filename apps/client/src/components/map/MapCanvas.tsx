@@ -11,7 +11,7 @@ import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { useRoomStore } from "@/store/room";
 import { sendWSRequest } from "@/utils/ws";
-import type { ShapeType } from "@beatsync/shared";
+import type { MapTileLayerId, ShapeType } from "@beatsync/shared";
 import { ClientActionEnum } from "@beatsync/shared";
 import L from "leaflet";
 import "leaflet-draw";
@@ -94,6 +94,78 @@ interface MapCanvasProps {
   canMutate: boolean;
 }
 
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+
+// Registry of selectable base maps. `id` is the stable value synced room-wide;
+// `label` is what the Leaflet layer switcher shows. "mapbox" only exists when a
+// token is configured at build time. Order = display order in the switcher.
+//
+// maxZoom is 23 everywhere so users can zoom in to street-furniture level for
+// precise shape placement; maxNativeZoom marks where each provider's real tiles
+// stop, past which Leaflet upscales the nearest tile (pixelated but functional).
+const MAP_MAX_ZOOM = 23;
+const TILE_LAYERS: { id: MapTileLayerId; label: string; create: () => L.TileLayer }[] = [
+  ...(MAPBOX_TOKEN
+    ? [
+        {
+          id: "mapbox" as MapTileLayerId,
+          label: "Satellite (Mapbox)",
+          // 512px tiles with zoomOffset -1 reach ~z23 natively, so no maxNativeZoom.
+          create: () =>
+            L.tileLayer(
+              `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`,
+              { maxZoom: MAP_MAX_ZOOM, tileSize: 512, zoomOffset: -1, attribution: "© Mapbox © Maxar © OpenStreetMap" }
+            ),
+        },
+      ]
+    : []),
+  {
+    id: "esri",
+    label: "Satellite (Esri)",
+    create: () =>
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: MAP_MAX_ZOOM,
+        maxNativeZoom: 19,
+        attribution:
+          "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+      }),
+  },
+  {
+    id: "michigan",
+    label: "Aerial (Michigan)",
+    // Michigan statewide hi-res aerial (MiSAIL) — keyless, ~9–12 in/px, native
+    // tiles to z19; Michigan-only, Leaflet upscales past z19.
+    create: () =>
+      L.tileLayer(
+        "https://imagery.michigan.gov/server/rest/services/Michigan_imagery_public/MapServer/tile/{z}/{y}/{x}",
+        {
+          maxZoom: MAP_MAX_ZOOM,
+          maxNativeZoom: 19,
+          attribution: "Imagery &copy; State of Michigan (MiSAIL)",
+        }
+      ),
+  },
+  {
+    id: "street",
+    label: "Street",
+    create: () =>
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: MAP_MAX_ZOOM,
+        maxNativeZoom: 19,
+        attribution: "© OpenStreetMap contributors",
+      }),
+  },
+];
+
+// Default when no room default is set: Mapbox if available (sharpest), else Esri.
+const BUILD_DEFAULT_TILE_ID: MapTileLayerId = MAPBOX_TOKEN ? "mapbox" : "esri";
+
+// Resolve a (possibly stale/unavailable) id to one that actually exists in this
+// build — e.g. a room defaulting to "mapbox" on a deployment without a token.
+function resolveTileLayerId(id: MapTileLayerId | undefined): MapTileLayerId {
+  return id && TILE_LAYERS.some((t) => t.id === id) ? id : BUILD_DEFAULT_TILE_ID;
+}
+
 export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -109,8 +181,14 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   // Single marker for the current client.
   const ownMarkerRef = useRef<L.Marker | null>(null);
   const isDraggingOwnRef = useRef(false);
+  // Base-map layers keyed by id, and the id currently shown — used to apply the
+  // room default and to know what an admin's "set as room default" broadcasts.
+  const layersByIdRef = useRef<Partial<Record<MapTileLayerId, L.TileLayer>>>({});
+  const activeTileLayerIdRef = useRef<MapTileLayerId>(BUILD_DEFAULT_TILE_ID);
+  const layersControlRef = useRef<L.Control.Layers | null>(null);
 
   const mapMetadata = useRoomStore((s) => s.mapMetadata);
+  const defaultTileLayerId = useRoomStore((s) => s.defaultTileLayerId);
   const connectedClients = useGlobalStore((s) => s.connectedClients);
   const shapes = useMapStore((s) => s.shapes);
   const selectedShapeId = useMapStore((s) => s.selectedShapeId);
@@ -129,11 +207,40 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     const center: L.LatLngTuple = mapMetadata?.center ?? [42.2808, -83.743];
     const zoom = mapMetadata?.zoom ?? 17;
 
-    const map = L.map(containerRef.current, { zoomControl: true }).setView(center, zoom);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 22,
-      attribution: "© OpenStreetMap contributors",
-    }).addTo(map);
+    // Allow zooming to z=23 (street-furniture-level) even though tile providers
+    // only ship native imagery up to z=19. Leaflet upscales the nearest-available
+    // native tile past that — pixelated but functional — which is exactly what
+    // we want for placing shapes precisely (e.g. tracing a single bench).
+    const map = L.map(containerRef.current, { zoomControl: true, maxZoom: MAP_MAX_ZOOM }).setView(center, zoom);
+
+    // Build the base-map layers from the registry. Satellite is the natural
+    // default for picking out buildings/paths/lawns when curating zones; the
+    // others (incl. Street) are offered in the layer switcher.
+    const layersById: Partial<Record<MapTileLayerId, L.TileLayer>> = {};
+    const baseLayers: Record<string, L.TileLayer> = {};
+    const labelToId: Record<string, MapTileLayerId> = {};
+    for (const def of TILE_LAYERS) {
+      const layer = def.create();
+      layersById[def.id] = layer;
+      baseLayers[def.label] = layer;
+      labelToId[def.label] = def.id;
+    }
+    layersByIdRef.current = layersById;
+
+    // Show the room's saved default if present (else the build default). The
+    // default may also arrive after init — the effect below handles that.
+    const initialId = resolveTileLayerId(useRoomStore.getState().defaultTileLayerId);
+    layersById[initialId]?.addTo(map);
+    activeTileLayerIdRef.current = initialId;
+
+    layersControlRef.current = L.control.layers(baseLayers, undefined, { position: "topright" }).addTo(map);
+
+    // Track local layer switches so the admin "set as room default" button knows
+    // the current selection.
+    map.on("baselayerchange", (e: L.LayersControlEvent) => {
+      const id = labelToId[e.name];
+      if (id) activeTileLayerIdRef.current = id;
+    });
 
     const drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
@@ -171,6 +278,65 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Apply the room-wide default tile layer ─────────────────────────
+  // Fires when an admin broadcasts a new default (DEFAULT_TILE_LAYER_UPDATE) or
+  // when the saved default arrives on connect. Switches every client's active
+  // base layer; users can still re-pick locally via the layer switcher.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !defaultTileLayerId) return;
+    const targetId = resolveTileLayerId(defaultTileLayerId);
+    const target = layersByIdRef.current[targetId];
+    if (!target || map.hasLayer(target)) return;
+    for (const layer of Object.values(layersByIdRef.current)) {
+      if (layer && layer !== target && map.hasLayer(layer)) map.removeLayer(layer);
+    }
+    map.addLayer(target);
+    activeTileLayerIdRef.current = targetId;
+  }, [defaultTileLayerId]);
+
+  // ── Admin-only "set as room default" button (inside the layer chooser) ──
+  // Injected into the layer switcher's expandable list, so it only shows when an
+  // admin opens the chooser. Lets them push their current base map to everyone.
+  // Added/removed with canMutate (e.g. on admin promotion).
+  useEffect(() => {
+    if (!canMutate) return;
+    const list = layersControlRef.current?.getContainer()?.querySelector(".leaflet-control-layers-list");
+    if (!list) return;
+
+    const separator = L.DomUtil.create("div", "leaflet-control-layers-separator", list as HTMLElement);
+    const wrap = L.DomUtil.create("div", "", list as HTMLElement);
+    const btn = L.DomUtil.create("button", "", wrap) as HTMLButtonElement;
+    btn.type = "button";
+    btn.textContent = "Set as room default";
+    btn.title = "Make the current base map the room default for everyone";
+    btn.style.cssText =
+      "display:block;width:100%;padding:4px 6px;font-size:11px;line-height:1.2;cursor:pointer;" +
+      "border:1px solid #ccc;border-radius:3px;background:#f4f4f4;color:#222;";
+    L.DomEvent.disableClickPropagation(wrap);
+    L.DomEvent.on(btn, "click", (ev) => {
+      L.DomEvent.preventDefault(ev);
+      const ws = useGlobalStore.getState().socket;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      sendWSRequest({
+        ws,
+        request: {
+          type: ClientActionEnum.enum.SET_DEFAULT_TILE_LAYER,
+          tileLayerId: activeTileLayerIdRef.current,
+        },
+      });
+      btn.textContent = "✓ Set for everyone";
+      setTimeout(() => {
+        btn.textContent = "Set as room default";
+      }, 1500);
+    });
+
+    return () => {
+      separator.remove();
+      wrap.remove();
+    };
+  }, [canMutate]);
+
   // ── Add/remove the draw control when admin status changes ──────
   // Keeps the same L.Map instance — only the control and its event handlers
   // come and go with canMutate. Shape layers and other state are preserved.
@@ -183,7 +349,7 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
       edit: { featureGroup: drawnItems, remove: true },
       draw: {
         polygon: { allowIntersection: false, showArea: false },
-        rectangle: false, // duplicates polygon for our purposes
+        rectangle: {},
         circle: {},
         circlemarker: false,
         marker: false,
