@@ -13,6 +13,7 @@
     "start:log": "rm -f ../../logs/server.log && bun run dist/index.js 2>&1 | tee ../../logs/server.log",
     "cleanup": "bun run scripts/cleanup-orphaned-rooms.ts",
     "cleanup:live": "bun run scripts/cleanup-orphaned-rooms.ts --live",
+    "room:admin-token": "bun run scripts/room-admin-token.ts",
     "load-test:demo": "bun run scripts/load-test-demo.ts",
     "load-test:demo:small": "bun run scripts/load-test-demo.ts --clients 100 --duration 15",
     "test": "bun test",
