@@ -1,5 +1,6 @@
 import { IS_DEMO_MODE } from "@/demo";
 import { globalManager } from "@/managers";
+import { BackupManager } from "@/managers/BackupManager";
 import { sendBroadcast, sendToClient, sendUnicast } from "@/utils/responses";
 import type { BunServer, WSData } from "@/utils/websocket";
 import { dispatchMessage } from "@/websocket/dispatch";
@@ -70,9 +71,18 @@ export const handleOpen = (ws: ServerWebSocket<WSData>, server: BunServer) => {
         roomType: room.getRoomType(),
         ...(room.getMapMetadata() && { mapMetadata: room.getMapMetadata() }),
         ...(room.getRoomName() && { roomName: room.getRoomName() }),
+        ...(room.getDefaultTileLayerId() && { defaultTileLayerId: room.getDefaultTileLayerId() }),
       },
     },
   });
+
+  // If this client is the room's admin, privately hand them the recoverable
+  // admin token so it persists in their browser (survives reconnects/restarts)
+  // and can be shared to grant co-curator access.
+  const adminToken = room.getAdminToken();
+  if (adminToken && room.getClient(ws.data.clientId)?.isAdmin) {
+    sendUnicast({ ws, message: { type: "SET_ADMIN_TOKEN", token: adminToken } });
+  }
 
   const { audioSources, globalVolume, lowPassFreq } = room.getState();
   const now = epochNow();
@@ -205,16 +215,16 @@ export const handleOpen = (ws: ServerWebSocket<WSData>, server: BunServer) => {
   // already covered by the PLAYLISTS_UPDATE sent earlier (one playlist per
   // shape, keyed by shape.id).
   if (room.isMapRoom()) {
-    const shapes = room.getShapes();
-    if (shapes.length > 0) {
-      sendToClient({
-        ws,
-        message: {
-          type: "ROOM_EVENT",
-          event: { type: "SHAPES_UPDATE", shapes },
-        },
-      });
-    }
+    // Always send the geometry snapshot on connect — even when empty — so a
+    // reconnecting client can never keep showing stale shapes for a room that
+    // no longer has them. The client replaces its shapes wholesale from this.
+    sendToClient({
+      ws,
+      message: {
+        type: "ROOM_EVENT",
+        event: { type: "SHAPES_UPDATE", shapes: room.getShapes() },
+      },
+    });
   }
 
   // Auto-resume: send a SCHEDULED_ACTION/PLAY for every currently-playing
@@ -297,11 +307,20 @@ export const handleClose = (ws: ServerWebSocket<WSData>, server: BunServer) => {
     if (room) {
       room.removeClient(clientId);
 
-      // Schedule cleanup for rooms with no active connections
+      // Last client left. Release per-room resources either way.
       if (!room.hasActiveConnections()) {
         room.stopSpatialAudio();
         room.clearClientChangeBroadcast();
-        globalManager.scheduleRoomCleanup(roomId);
+        if (IS_DEMO_MODE) {
+          // Demo rooms stay ephemeral: schedule deletion after the grace period.
+          globalManager.scheduleRoomCleanup(roomId);
+        } else {
+          // Non-demo rooms are PERMANENT: never auto-delete. Persist the final
+          // state so a server restart (or a much later return) restores it.
+          void BackupManager.backupState().catch((error) => {
+            console.error(`Failed to back up room ${roomId} on last disconnect:`, error);
+          });
+        }
       }
     }
 
