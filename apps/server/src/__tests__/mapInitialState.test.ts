@@ -103,12 +103,14 @@ describe("handleOpen: SHAPES_UPDATE for map rooms", () => {
     expect(findEvent(getWsSentMessages(ws), "SHAPES_UPDATE")).toBeUndefined();
   });
 
-  it("does NOT send SHAPES_UPDATE for empty map rooms", () => {
+  it("ALWAYS sends SHAPES_UPDATE (even empty) for map rooms so clients can't keep stale zones", () => {
     const room = globalManager.getOrCreateRoom("r1");
     room.setRoomType("map");
     const ws = createMockWs({ clientId: "c1", roomId: "r1" });
     handleOpen(ws, createMockServer());
-    expect(findEvent(getWsSentMessages(ws), "SHAPES_UPDATE")).toBeUndefined();
+    const ev = findEvent(getWsSentMessages(ws), "SHAPES_UPDATE");
+    if (ev?.event.type !== "SHAPES_UPDATE") throw new Error("expected a SHAPES_UPDATE event");
+    expect(ev.event.shapes).toEqual([]);
   });
 
   it("sends a SHAPES_UPDATE listing every shape on connect", () => {
