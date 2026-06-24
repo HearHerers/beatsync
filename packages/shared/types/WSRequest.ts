@@ -33,12 +33,12 @@ export const ClientActionEnum = z.enum([
   "SET_GLOBAL_VOLUME", // Set global volume for all clients
   "SEND_CHAT_MESSAGE", // Send a chat message,
   "AUDIO_SOURCE_LOADED", // Audio source loaded in response to a LOAD_AUDIO_SOURCE request
-  "REORDER_AUDIO_SOURCES", // Reorder audio sources in the room queue
   "SET_METRONOME", // Toggle metronome on/off for all clients
   "SET_LOW_PASS_FREQ", // Set low-pass filter cutoff frequency
   "SET_CONTEXT_LOOP", // Set the loop flag for a playlist context
   "ADD_TRACK_TO_CONTEXT", // Append a track to a specific playlist context
   "REMOVE_TRACK_FROM_CONTEXT", // Remove a track from a specific playlist context
+  "REORDER_TRACK_IN_CONTEXT", // Reorder the tracks within a specific playlist context
   // Map-room geometry actions. Audio behavior of a shape's playlist (tracks,
   // play/pause, loop) flows through the unified per-context actions with
   // contextId = shape.id — there are no shape-specific audio actions.
@@ -173,11 +173,6 @@ export const AudioSourceLoadedSchema = z.object({
   contextId: z.string().optional(),
 });
 
-export const ReorderAudioSourcesSchema = z.object({
-  type: z.literal(ClientActionEnum.enum.REORDER_AUDIO_SOURCES),
-  reorderedAudioSources: z.array(AudioSourceSchema).min(1),
-});
-
 export const SetMetronomeSchema = z.object({
   type: z.literal(ClientActionEnum.enum.SET_METRONOME),
   enabled: z.boolean(),
@@ -217,6 +212,19 @@ export const RemoveTrackFromContextSchema = z.object({
   contextId: z.string().optional(),
 });
 export type RemoveTrackFromContextType = z.infer<typeof RemoveTrackFromContextSchema>;
+
+/**
+ * Reorder the tracks within a specific context's playlist. `orderedUrls` is the
+ * full new ordering by track URL — the server already holds the source objects,
+ * so only the order needs to travel. Works for any context (audio-room "main"
+ * and map-room shape playlists alike). Omitted contextId = "main".
+ */
+export const ReorderTrackInContextSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.REORDER_TRACK_IN_CONTEXT),
+  orderedUrls: z.array(z.string()).min(1),
+  contextId: z.string().optional(),
+});
+export type ReorderTrackInContextType = z.infer<typeof ReorderTrackInContextSchema>;
 
 // ── Map-room geometry ──────────────────────────────────────────────
 // Audio behavior (tracks, play/pause, loop) flows through the unified per-
@@ -313,12 +321,12 @@ export const WSRequestSchema = z.discriminatedUnion("type", [
   SetGlobalVolumeSchema,
   SendChatMessageSchema,
   AudioSourceLoadedSchema,
-  ReorderAudioSourcesSchema,
   SetMetronomeSchema,
   SetLowPassFreqSchema,
   SetContextLoopSchema,
   AddTrackToContextSchema,
   RemoveTrackFromContextSchema,
+  ReorderTrackInContextSchema,
   // Map-room geometry
   AddShapeSchema,
   UpdateShapeSchema,
@@ -337,7 +345,6 @@ export type PlayActionType = z.infer<typeof PlayActionSchema>;
 export type PauseActionType = z.infer<typeof PauseActionSchema>;
 export type ReorderClientType = z.infer<typeof ReorderClientSchema>;
 export type SetListeningSourceType = z.infer<typeof SetListeningSourceSchema>;
-export type ReorderAudioSourcesType = z.infer<typeof ReorderAudioSourcesSchema>;
 
 // Mapped type to access request types by their type field
 export type ExtractWSRequestFrom = {
