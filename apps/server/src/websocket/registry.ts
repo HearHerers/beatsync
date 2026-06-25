@@ -22,6 +22,7 @@ import { handleSetLowPassFreq } from "@/websocket/handlers/setLowPassFreq";
 import { handleSetContextLoop } from "@/websocket/handlers/setContextLoop";
 import {
   handleAddTrackToContext,
+  handleImportTracksToContext,
   handleRemoveTrackFromContext,
   handleReorderTrackInContext,
 } from "@/websocket/handlers/contextTracks";
@@ -157,6 +158,10 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.REORDER_TRACK_IN_CONTEXT]: {
     handle: handleReorderTrackInContext,
     description: "Reorder the tracks within a specific playlist context",
+  },
+  [ClientActionEnum.enum.IMPORT_TRACKS_TO_CONTEXT]: {
+    handle: handleImportTracksToContext,
+    description: "Bulk-add tracks from an imported playlist file to a context",
   },
 
   // ── Map-room handlers ─────────────────────────────────────────────
