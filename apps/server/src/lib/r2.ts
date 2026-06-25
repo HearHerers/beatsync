@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -174,6 +175,71 @@ export function generateAudioFileName(originalName: string): string {
   const dateStr = now.toISOString().replace(":", "-");
 
   return `${safeName}${R2_AUDIO_FILE_NAME_DELIMITER}${dateStr}.${extension}`;
+}
+
+/**
+ * Whether a public URL points at our own R2 bucket (same origin as the
+ * configured PUBLIC_URL). Only same-bucket objects can be server-side copied;
+ * foreign-host URLs (e.g. a playlist exported from another deployment) cannot.
+ */
+export function isOwnBucketUrl(url: string): boolean {
+  try {
+    return new URL(url).origin === new URL(S3_CONFIG.PUBLIC_URL).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Parse the `room-{id}/` prefix out of a public URL, returning the room id, or
+ * null if the URL isn't one of ours / isn't room-scoped.
+ */
+export function roomIdFromUrl(url: string): string | null {
+  if (!isOwnBucketUrl(url)) return null;
+  const key = extractKeyFromUrl(url);
+  const match = key ? /^room-([^/]+)\//.exec(key) : null;
+  return match ? match[1] : null;
+}
+
+/**
+ * Server-side copy an audio object that already lives in our bucket into a
+ * destination room's prefix, minting a fresh unique filename that preserves the
+ * human-readable display name (the part before the `___` delimiter). Returns the
+ * new public URL, or null if the URL isn't ours or the copy fails (e.g. the
+ * source object was deleted). Never fetches the URL — pure S3 CopyObject.
+ */
+export async function copyObjectIntoRoom(sourceUrl: string, destRoomId: string): Promise<string | null> {
+  if (!isOwnBucketUrl(sourceUrl)) return null;
+  const sourceKey = extractKeyFromUrl(sourceUrl);
+  if (!sourceKey) return null;
+
+  // Reconstruct an "originalName.ext" to feed generateAudioFileName so the new
+  // object keeps the same display name with a fresh, unique timestamp.
+  const baseName = sourceKey.split("/").pop() ?? "audio.mp3";
+  const extension = baseName.includes(".") ? baseName.split(".").pop()! : "mp3";
+  const delimiterIndex = baseName.indexOf(R2_AUDIO_FILE_NAME_DELIMITER);
+  const displayName = delimiterIndex !== -1 ? baseName.substring(0, delimiterIndex) : baseName.replace(/\.[^/.]+$/, "");
+  const destFileName = generateAudioFileName(`${displayName}.${extension}`);
+  const destKey = createKey(destRoomId, destFileName);
+
+  // CopySource must be URL-encoded per segment (bucket + each key part).
+  const encodedSource = [S3_CONFIG.BUCKET_NAME, ...sourceKey.split("/")].map(encodeURIComponent).join("/");
+
+  try {
+    await r2Client.send(
+      new CopyObjectCommand({
+        Bucket: S3_CONFIG.BUCKET_NAME,
+        Key: destKey,
+        CopySource: encodedSource,
+        Metadata: { roomId: destRoomId, uploadedAt: new Date().toISOString() },
+        MetadataDirective: "REPLACE",
+      })
+    );
+    return getPublicAudioUrl(destRoomId, destFileName);
+  } catch (error) {
+    console.error(`copyObjectIntoRoom failed for ${sourceUrl} -> room-${destRoomId}:`, error);
+    return null;
+  }
 }
 
 /**
