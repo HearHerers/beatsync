@@ -178,16 +178,33 @@ export function generateAudioFileName(originalName: string): string {
 }
 
 /**
- * Whether a public URL points at our own R2 bucket (same origin as the
- * configured PUBLIC_URL). Only same-bucket objects can be server-side copied;
+ * The R2 object key for one of our public URLs, or null if the URL doesn't
+ * belong to us. Derived RELATIVE TO `PUBLIC_URL` (every object's URL is
+ * `${PUBLIC_URL}/${key}` — see getPublicAudioUrl), so this is correct for both
+ * virtual-hosted PUBLIC_URLs (`https://cdn.example.com`) and path-style ones
+ * that include the bucket (`https://host/bucket`). Do NOT use the raw URL
+ * pathname here — that would fold the bucket segment into the key on path-style
+ * deployments and break every S3 operation on the result.
+ */
+export function keyFromPublicUrl(url: string): string | null {
+  if (!S3_CONFIG.PUBLIC_URL) return null;
+  const base = S3_CONFIG.PUBLIC_URL.replace(/\/+$/, "") + "/";
+  if (!url.startsWith(base)) return null;
+  // Decode each path segment (roomId + filename) the way extractKeyFromUrl does.
+  return url
+    .slice(base.length)
+    .split("/")
+    .map((part) => decodeURIComponent(part))
+    .join("/");
+}
+
+/**
+ * Whether a public URL points at our own R2 bucket (its object key resolves
+ * relative to PUBLIC_URL). Only same-bucket objects can be server-side copied;
  * foreign-host URLs (e.g. a playlist exported from another deployment) cannot.
  */
 export function isOwnBucketUrl(url: string): boolean {
-  try {
-    return new URL(url).origin === new URL(S3_CONFIG.PUBLIC_URL).origin;
-  } catch {
-    return false;
-  }
+  return keyFromPublicUrl(url) !== null;
 }
 
 /**
@@ -195,8 +212,7 @@ export function isOwnBucketUrl(url: string): boolean {
  * null if the URL isn't one of ours / isn't room-scoped.
  */
 export function roomIdFromUrl(url: string): string | null {
-  if (!isOwnBucketUrl(url)) return null;
-  const key = extractKeyFromUrl(url);
+  const key = keyFromPublicUrl(url);
   const match = key ? /^room-([^/]+)\//.exec(key) : null;
   return match ? match[1] : null;
 }
@@ -209,8 +225,7 @@ export function roomIdFromUrl(url: string): string | null {
  * source object was deleted). Never fetches the URL — pure S3 CopyObject.
  */
 export async function copyObjectIntoRoom(sourceUrl: string, destRoomId: string): Promise<string | null> {
-  if (!isOwnBucketUrl(sourceUrl)) return null;
-  const sourceKey = extractKeyFromUrl(sourceUrl);
+  const sourceKey = keyFromPublicUrl(sourceUrl);
   if (!sourceKey) return null;
 
   // Reconstruct an "originalName.ext" to feed generateAudioFileName so the new
