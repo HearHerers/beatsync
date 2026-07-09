@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CHAT_CONSTANTS, LOW_PASS_CONSTANTS, MAP_CONSTANTS } from "../constants";
 import { AudioSourceSchema, MapMetadataSchema, MapTileLayerIdEnum, PositionSchema } from "./basic";
+import { PLAYLIST_EXPORT_MAX_TRACKS } from "./playlist";
 import { ShapeSchema } from "./shape";
 
 // ROOM EVENTS
@@ -39,6 +40,7 @@ export const ClientActionEnum = z.enum([
   "SET_CONTEXT_LOOP", // Set the loop flag for a playlist context
   "ADD_TRACK_TO_CONTEXT", // Append a track to a specific playlist context
   "REMOVE_TRACK_FROM_CONTEXT", // Remove a track from a specific playlist context
+  "IMPORT_TRACKS_TO_CONTEXT", // Bulk-add tracks (from an imported playlist file) to a context
   // Map-room geometry actions. Audio behavior of a shape's playlist (tracks,
   // play/pause, loop) flows through the unified per-context actions with
   // contextId = shape.id — there are no shape-specific audio actions.
@@ -218,6 +220,20 @@ export const RemoveTrackFromContextSchema = z.object({
 });
 export type RemoveTrackFromContextType = z.infer<typeof RemoveTrackFromContextSchema>;
 
+/**
+ * Bulk-add tracks to a context from an imported playlist file. Carries only the
+ * track URLs — display names derive from the URL, and the source playlist's loop
+ * flag is intentionally not applied (the destination keeps its setting). The
+ * server classifies each URL (same-room reference vs. same-bucket re-host vs.
+ * foreign-host reference) when adding. Omitted contextId = "main".
+ */
+export const ImportTracksToContextSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.IMPORT_TRACKS_TO_CONTEXT),
+  urls: z.array(z.string().url()).min(1).max(PLAYLIST_EXPORT_MAX_TRACKS),
+  contextId: z.string().optional(),
+});
+export type ImportTracksToContextType = z.infer<typeof ImportTracksToContextSchema>;
+
 // ── Map-room geometry ──────────────────────────────────────────────
 // Audio behavior (tracks, play/pause, loop) flows through the unified per-
 // context actions with contextId = shape.id. The shape actions below only
@@ -319,6 +335,7 @@ export const WSRequestSchema = z.discriminatedUnion("type", [
   SetContextLoopSchema,
   AddTrackToContextSchema,
   RemoveTrackFromContextSchema,
+  ImportTracksToContextSchema,
   // Map-room geometry
   AddShapeSchema,
   UpdateShapeSchema,
