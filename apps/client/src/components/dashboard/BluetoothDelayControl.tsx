@@ -5,9 +5,9 @@
 //
 // Sign convention: BT earbuds add latency *after* the local audio stack, which
 // the browser's AudioContext.outputLatency can't see. Compensating means
-// scheduling playback EARLIER by that many ms — internally `nudgeOffsetMs` is
-// negative, but we surface it as a positive "delay compensation" number which
-// matches how users think about their headphones ("my AirPods add ~180ms").
+// scheduling playback EARLIER by that many ms — a POSITIVE `nudgeOffsetMs`
+// (it shortens the scheduled wait, see getWaitTimeSeconds). So the "delay
+// compensation" number surfaced here maps 1:1 onto nudgeOffsetMs.
 
 import { cn } from "@/lib/utils";
 import { useGlobalStore } from "@/store/global";
@@ -36,8 +36,8 @@ const MAX_DELAY_MS = 500;
 export const BluetoothDelayControl = () => {
   const nudgeOffsetMs = useGlobalStore((s) => s.nudgeOffsetMs);
   const nudge = useGlobalStore((s) => s.nudge);
-  // Surface negative nudge as positive "delay being compensated for".
-  const currentDelayMs = -nudgeOffsetMs;
+  // Positive nudge = play earlier = the delay being compensated for.
+  const currentDelayMs = nudgeOffsetMs;
   const [draft, setDraft] = useState<number>(currentDelayMs);
   // Sync draft to external changes (other UI also writes nudgeOffsetMs).
   useEffect(() => {
@@ -49,8 +49,8 @@ export const BluetoothDelayControl = () => {
 
   const applyDelayMs = (delayMs: number) => {
     // The internal action takes a *relative* nudge. Compute the diff between
-    // the target absolute value (which is the negation of delayMs) and current.
-    const targetNudge = -delayMs;
+    // the target absolute value and current.
+    const targetNudge = delayMs;
     const diff = targetNudge - nudgeOffsetMs;
     if (diff === 0) return;
     nudge({ amountMs: diff });
