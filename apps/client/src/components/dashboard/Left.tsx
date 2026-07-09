@@ -8,6 +8,7 @@ import { Hash } from "lucide-react";
 import { motion } from "motion/react";
 import { AudioUploaderMinimal } from "../AudioUploaderMinimal";
 import { Separator } from "../ui/separator";
+import { BluetoothDelayControl } from "./BluetoothDelayControl";
 import { ConnectedUsersList } from "./ConnectedUsersList";
 import { RoomQRCode } from "./CopyRoom";
 import { GlobalVolumeControl } from "./GlobalVolumeControl";
@@ -83,6 +84,10 @@ export const Left = ({ className, hideUploader = false, roomLabel }: LeftProps) 
       <Separator className="bg-neutral-800/50" />
 
       <PlaybackPermissions />
+
+      <Separator className="bg-neutral-800/50" />
+
+      <BluetoothDelayControl />
 
       <Separator className="bg-neutral-800/50" />
 
