@@ -26,7 +26,7 @@ interface Preset {
 const PRESETS: Preset[] = [
   { label: "Wired / speakers", delayMs: 0, hint: "no compensation" },
   { label: "LE Audio (LC3)", delayMs: 25 },
-  { label: "aptX LL", delayMs: 40 },
+  { label: "aptX LL / Bose QC", delayMs: 40 },
   { label: "aptX", delayMs: 100 },
   { label: "AirPods / AAC", delayMs: 180 },
 ];
