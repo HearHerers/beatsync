@@ -61,7 +61,7 @@ jobs:
           # in authorized_keys reads it via $SSH_ORIGINAL_COMMAND.
           ssh -p 2222 -i ~/.ssh/id_ed25519 \
             -o BatchMode=yes -o ConnectTimeout=15 \
-            cyrus@purkinje.tail46b71f.ts.net \
+            beatsync@purkinje.tail46b71f.ts.net \
             "$BRANCH" 2>&1 | tee deploy.log
 
       - name: Open issue on failure
