@@ -1,33 +1,30 @@
-# Beatsync
+# HearHere
 
-Beatsync is a high-precision web audio player built for multi-device playback. The official app is [beatsync.gg](https://www.beatsync.gg/).
+A geospatial silent disco app.
 
-https://github.com/user-attachments/assets/2aa385a7-2a07-4ab5-80b1-fda553efc57b
+The host draws sound zones on a real-world map, and as you walk (or dance) in and out of different zones, the sounds update based on your location.
 
-## Features
+Built on [Beatsync](https://github.com/freeman-jiang/beatsync), a high-precision web audio sync engine, as the audio backend — [NTP-inspired](https://en.wikipedia.org/wiki/Network_Time_Protocol) time synchronization keeps playback millisecond-accurate across every device in the room.
 
-- **Millisecond-accurate synchronization**: Abstracts [NTP-inspired](https://en.wikipedia.org/wiki/Network_Time_Protocol) time synchronization primitives to achieve a high degree of accuracy
-- **Cross-platform**: Works on any device with a modern browser (Chrome recommended for best performance)
-- **Spatial audio:** Allows controlling device volumes through a virtual listening source for interesting sonic effects
-- **Polished interface**: Smooth loading states, status indicators, and all UI elements come built-in
-- **Self-hostable**: Run your own instance with a few commands
+## How it works
 
-
-> [!NOTE]
-> Beatsync is in early development. Mobile support is working, but experimental. Please consider creating an issue or contributing with a PR if you run into problems!
+- **Map rooms**: A host draws zones (circles and polygons) on a shared map and assigns a sound to each
+- **GPS-driven audio**: Your phone's location determines what you hear — cross a zone boundary and the mix changes, with proximity-based gain near edges
+- **Synchronized playback**: Everyone in the same zone hears the same audio at the same moment
+- **Runs in the browser**: No app install — works on any device with a modern browser (Chrome recommended)
 
 ## Quickstart
 
 This project uses [Turborepo](https://turbo.build/repo).
 
-Fill in the `.env` file in `apps/client` with the following:
+Fill in the `.env` file in `apps/client`:
 
 ```sh
 NEXT_PUBLIC_API_URL=http://localhost:8080
 NEXT_PUBLIC_WS_URL=ws://localhost:8080/ws
 ```
 
-Run the following commands to start the server and client:
+Then start the server and client:
 
 ```sh
 bun install          # installs once for all workspaces
