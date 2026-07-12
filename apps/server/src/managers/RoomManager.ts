@@ -1481,6 +1481,28 @@ export class RoomManager {
   }
 
   /**
+   * Append multiple tracks to a context in order, de-duplicating by URL against
+   * both the existing playlist and earlier entries in the same batch. Used by
+   * playlist import. Returns the updated tracks, or undefined if the playlist
+   * doesn't exist.
+   */
+  addTracksToContext(contextId: string, sources: AudioSourceType[]): AudioSourceType[] | undefined {
+    const playlist = this.playlists.get(contextId);
+    if (!playlist) return undefined;
+    const seen = new Set(playlist.tracks.map((t) => t.url));
+    const additions: AudioSourceType[] = [];
+    for (const source of sources) {
+      if (seen.has(source.url)) continue;
+      seen.add(source.url);
+      additions.push(source);
+    }
+    if (additions.length > 0) {
+      playlist.tracks = [...playlist.tracks, ...additions];
+    }
+    return playlist.tracks;
+  }
+
+  /**
    * Remove a track from a specific context's playlist. If the removed track was
    * currently playing, the playback resets to paused. Returns { tracks,
    * removedCurrent } or undefined if the playlist is missing.
