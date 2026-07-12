@@ -353,7 +353,7 @@ describe("contextTracks handlers", () => {
     });
 
     const pause = broadcasts.find((b) => b.message.type === "SCHEDULED_ACTION");
-    if (!pause || pause.message.type !== "SCHEDULED_ACTION") throw new Error("expected a scheduled PAUSE broadcast");
+    if (pause?.message.type !== "SCHEDULED_ACTION") throw new Error("expected a scheduled PAUSE broadcast");
     expect(pause.message.scheduledAction).toMatchObject({ type: "PAUSE", contextId: "s1" });
 
     // Playlist snapshot reflects the removal + paused state.
@@ -430,7 +430,7 @@ describe("handleDeleteAudioSources (main queue)", () => {
     });
 
     const pause = broadcasts.find((b) => b.message.type === "SCHEDULED_ACTION");
-    if (!pause || pause.message.type !== "SCHEDULED_ACTION") throw new Error("expected a scheduled PAUSE broadcast");
+    if (pause?.message.type !== "SCHEDULED_ACTION") throw new Error("expected a scheduled PAUSE broadcast");
     expect(pause.message.scheduledAction.type).toBe("PAUSE");
     // Main context: no contextId so audio-room clients take the schedulePause path.
     expect("contextId" in pause.message.scheduledAction && pause.message.scheduledAction.contextId).toBeFalsy();
