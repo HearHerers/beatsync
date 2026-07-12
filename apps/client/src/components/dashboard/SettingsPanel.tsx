@@ -50,6 +50,19 @@ export const SettingsPanel = ({ className }: SettingsPanelProps) => {
       <Separator className="bg-neutral-800/50" />
 
       <MobileNudgeControl />
+
+      {/* Tips Section */}
+      <div className="mt-auto pb-4 pt-2 text-neutral-400">
+        <div className="flex flex-col gap-2 p-4 border-t border-neutral-800/50">
+          <h5 className="text-xs font-medium text-neutral-300">Tips</h5>
+          <ul className="list-disc list-outside pl-4 space-y-1.5">
+            <li className="text-xs leading-relaxed">
+              Sync is optimal when audio outputs directly from the speaker. For Bluetooth output, you may need to adjust
+              the delay settings here.
+            </li>
+          </ul>
+        </div>
+      </div>
     </div>
   );
 };

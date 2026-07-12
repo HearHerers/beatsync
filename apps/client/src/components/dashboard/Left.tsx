@@ -14,7 +14,7 @@ import { PlaybackPermissions } from "./PlaybackPermissions";
 interface LeftProps {
   className?: string;
   /** When true, omit the bottom audio uploader (map rooms move upload to each
-   *  shape's playlist column). Tips section still renders. */
+   *  shape's playlist column). */
   hideUploader?: boolean;
   /** Override the room header label. When set, the `#` icon is hidden and the
    *  label renders as `{roomLabel} {roomId}` (e.g. map rooms use "HearHere room"). */
@@ -83,15 +83,7 @@ export const Left = ({ className, hideUploader = false, roomLabel }: LeftProps) 
 
       {/* <Separator className="bg-neutral-800/50" /> */}
 
-      {/* Tips Section */}
       <motion.div className="mt-auto pb-4 pt-2 text-neutral-400">
-        <div className="flex flex-col gap-2 p-4 border-t border-neutral-800/50">
-          <h5 className="text-xs font-medium text-neutral-300">Tips</h5>
-          <ul className="list-disc list-outside pl-4 space-y-1.5">
-            <li className="text-xs leading-relaxed">{"Play on speaker directly. Don't use Bluetooth."}</li>
-          </ul>
-        </div>
-
         {!hideUploader && (
           <div className="pl-1">
             <AudioUploaderMinimal />
