@@ -45,6 +45,25 @@ export const handleRemoveTrackFromContext: HandlerFunction<ExtractWSRequestFrom[
   const contextId = message.contextId ?? MAIN_CONTEXT_ID;
   const result = room.removeTrackFromContext(contextId, message.url);
   if (!result) return;
+  // Removing the playing track resets the playlist's state to paused, but the
+  // snapshot alone doesn't stop audio already running on clients — schedule an
+  // explicit pause for everyone.
+  if (result.removedCurrent) {
+    sendBroadcast({
+      server,
+      roomId: room.getRoomId(),
+      message: {
+        type: "SCHEDULED_ACTION",
+        scheduledAction: {
+          type: "PAUSE",
+          audioSource: "",
+          trackTimeSeconds: 0,
+          ...(contextId !== MAIN_CONTEXT_ID && { contextId }),
+        },
+        serverTimeToExecute: room.getScheduledExecutionTime(),
+      },
+    });
+  }
   sendBroadcast({
     server,
     roomId: room.getRoomId(),
