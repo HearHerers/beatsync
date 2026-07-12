@@ -44,6 +44,7 @@ import {
   handleUpdateShape,
 } from "@/websocket/handlers/mapHandlers";
 import { handleAddTrackToContext, handleRemoveTrackFromContext } from "@/websocket/handlers/contextTracks";
+import { handleDeleteAudioSources } from "@/websocket/handlers/handleDeleteAudioSources";
 
 const ROOM_ID = "map-handlers-test";
 
@@ -331,6 +332,58 @@ describe("contextTracks handlers", () => {
     const ev = lastEventOfType("PLAYLISTS_UPDATE");
     if (ev.type !== "PLAYLISTS_UPDATE") throw new Error("unreachable");
     expect(ev.playlists.find((p) => p.id === "s1")?.tracks).toEqual([{ url: "b.mp3" }]);
+    // Nothing was playing, so no pause should be scheduled.
+    expect(broadcasts.some((b) => b.message.type === "SCHEDULED_ACTION")).toBe(false);
+  });
+
+  it("REMOVE_TRACK_FROM_CONTEXT of the playing track schedules a PAUSE for everyone", () => {
+    const { room, adminWs, server } = freshMapRoom();
+    room.addShape(makeShape("s1"));
+    room.addTrackToContext("s1", { url: "a.mp3" });
+    room.addTrackToContext("s1", { url: "b.mp3" });
+    room.updatePlaybackSchedulePlay(
+      { type: "PLAY", audioSource: "a.mp3", trackTimeSeconds: 0, contextId: "s1" },
+      Date.now()
+    );
+    broadcasts = [];
+    void handleRemoveTrackFromContext({
+      ws: adminWs,
+      message: { type: "REMOVE_TRACK_FROM_CONTEXT", contextId: "s1", url: "a.mp3" },
+      server,
+    });
+
+    const pause = broadcasts.find((b) => b.message.type === "SCHEDULED_ACTION");
+    if (pause?.message.type !== "SCHEDULED_ACTION") throw new Error("expected a scheduled PAUSE broadcast");
+    expect(pause.message.scheduledAction).toMatchObject({ type: "PAUSE", contextId: "s1" });
+
+    // Playlist snapshot reflects the removal + paused state.
+    const ev = lastEventOfType("PLAYLISTS_UPDATE");
+    if (ev.type !== "PLAYLISTS_UPDATE") throw new Error("unreachable");
+    const playlist = ev.playlists.find((p) => p.id === "s1");
+    expect(playlist?.tracks).toEqual([{ url: "b.mp3" }]);
+    expect(playlist?.playbackState.type).toBe("paused");
+  });
+
+  it("REMOVE_TRACK_FROM_CONTEXT of a non-playing track does not schedule a PAUSE", () => {
+    const { room, adminWs, server } = freshMapRoom();
+    room.addShape(makeShape("s1"));
+    room.addTrackToContext("s1", { url: "a.mp3" });
+    room.addTrackToContext("s1", { url: "b.mp3" });
+    room.updatePlaybackSchedulePlay(
+      { type: "PLAY", audioSource: "a.mp3", trackTimeSeconds: 0, contextId: "s1" },
+      Date.now()
+    );
+    broadcasts = [];
+    void handleRemoveTrackFromContext({
+      ws: adminWs,
+      message: { type: "REMOVE_TRACK_FROM_CONTEXT", contextId: "s1", url: "b.mp3" },
+      server,
+    });
+    expect(broadcasts.some((b) => b.message.type === "SCHEDULED_ACTION")).toBe(false);
+    // Playback of the untouched track continues.
+    const ev = lastEventOfType("PLAYLISTS_UPDATE");
+    if (ev.type !== "PLAYLISTS_UPDATE") throw new Error("unreachable");
+    expect(ev.playlists.find((p) => p.id === "s1")?.playbackState.type).toBe("playing");
   });
 
   it("ADD_TRACK_TO_CONTEXT with missing contextId routes to 'main'", () => {
@@ -360,5 +413,40 @@ describe("contextTracks handlers", () => {
       })
     ).toThrow(/permission/);
     expect(broadcasts).toHaveLength(0);
+  });
+});
+
+describe("handleDeleteAudioSources (main queue)", () => {
+  it("deleting the playing track schedules a PAUSE for everyone", async () => {
+    const { room, adminWs, server } = freshMapRoom();
+    room.addAudioSource({ url: "a.mp3" });
+    room.addAudioSource({ url: "b.mp3" });
+    room.updatePlaybackSchedulePlay({ type: "PLAY", audioSource: "a.mp3", trackTimeSeconds: 0 }, Date.now());
+    broadcasts = [];
+    await handleDeleteAudioSources({
+      ws: adminWs,
+      message: { type: "DELETE_AUDIO_SOURCES", urls: ["a.mp3"] },
+      server,
+    });
+
+    const pause = broadcasts.find((b) => b.message.type === "SCHEDULED_ACTION");
+    if (pause?.message.type !== "SCHEDULED_ACTION") throw new Error("expected a scheduled PAUSE broadcast");
+    expect(pause.message.scheduledAction.type).toBe("PAUSE");
+    // Main context: no contextId so audio-room clients take the schedulePause path.
+    expect("contextId" in pause.message.scheduledAction && pause.message.scheduledAction.contextId).toBeFalsy();
+  });
+
+  it("deleting a non-playing track does not schedule a PAUSE", async () => {
+    const { room, adminWs, server } = freshMapRoom();
+    room.addAudioSource({ url: "a.mp3" });
+    room.addAudioSource({ url: "b.mp3" });
+    room.updatePlaybackSchedulePlay({ type: "PLAY", audioSource: "a.mp3", trackTimeSeconds: 0 }, Date.now());
+    broadcasts = [];
+    await handleDeleteAudioSources({
+      ws: adminWs,
+      message: { type: "DELETE_AUDIO_SOURCES", urls: ["b.mp3"] },
+      server,
+    });
+    expect(broadcasts.some((b) => b.message.type === "SCHEDULED_ACTION")).toBe(false);
   });
 });
