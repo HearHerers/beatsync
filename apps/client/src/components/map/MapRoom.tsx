@@ -21,6 +21,7 @@
 
 import { Left } from "@/components/dashboard/Left";
 import { Right } from "@/components/dashboard/Right";
+import { SettingsPanel } from "@/components/dashboard/SettingsPanel";
 import { TopBar } from "@/components/room/TopBar";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -44,6 +45,7 @@ import {
   MapPin,
   MessageCircle,
   MousePointer,
+  Settings,
   Users,
 } from "lucide-react";
 import { motion } from "motion/react";
@@ -367,6 +369,7 @@ const MobileLayout = ({ canMutate, overlays }: PaneProps) => {
   const [mapOpen, setMapOpen] = useState(true);
   const [playlistOpen, setPlaylistOpen] = useState(true);
   const [chatOpen, setChatOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const toggles: Array<{
     label: string;
@@ -378,6 +381,7 @@ const MobileLayout = ({ canMutate, overlays }: PaneProps) => {
     { label: "Map", icon: <MapIcon className="size-3.5" />, open: mapOpen, setOpen: setMapOpen },
     { label: "Playlist", icon: <ListMusic className="size-3.5" />, open: playlistOpen, setOpen: setPlaylistOpen },
     { label: "Chat", icon: <MessageCircle className="size-3.5" />, open: chatOpen, setOpen: setChatOpen },
+    { label: "Settings", icon: <Settings className="size-3.5" />, open: settingsOpen, setOpen: setSettingsOpen },
   ];
 
   return (
@@ -388,11 +392,12 @@ const MobileLayout = ({ canMutate, overlays }: PaneProps) => {
             key={label}
             size="sm"
             variant={open ? "default" : "outline"}
-            className="h-7 flex-1 px-2 text-[11px]"
+            className="h-7 flex-1 px-1.5 text-[11px]"
             onClick={() => setOpen(!open)}
+            title={label}
           >
-            <span className="mr-1">{icon}</span>
-            {label}
+            <span className="max-[480px]:mr-0 mr-1">{icon}</span>
+            <span className="max-[480px]:hidden">{label}</span>
           </Button>
         ))}
       </div>
@@ -417,6 +422,11 @@ const MobileLayout = ({ canMutate, overlays }: PaneProps) => {
         {chatOpen && (
           <div className="flex-1 min-h-0 overflow-hidden border-t border-neutral-800/50">
             <Right chatOnly />
+          </div>
+        )}
+        {settingsOpen && (
+          <div className="flex-1 min-h-0 overflow-hidden border-t border-neutral-800/50">
+            <SettingsPanel className="h-full" />
           </div>
         )}
       </div>

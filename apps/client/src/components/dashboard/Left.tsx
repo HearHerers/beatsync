@@ -1,8 +1,6 @@
 "use client";
 
-import { audioContextManager } from "@/lib/audioContextManager";
 import { cn } from "@/lib/utils";
-import { MAX_NTP_MEASUREMENTS, useGlobalStore } from "@/store/global";
 import { useRoomStore } from "@/store/room";
 import { Hash } from "lucide-react";
 import { motion } from "motion/react";
@@ -11,8 +9,6 @@ import { Separator } from "../ui/separator";
 import { BluetoothDelayControl } from "./BluetoothDelayControl";
 import { ConnectedUsersList } from "./ConnectedUsersList";
 import { RoomQRCode } from "./CopyRoom";
-import { GlobalVolumeControl } from "./GlobalVolumeControl";
-import { MobileNudgeControl } from "./MobileNudgeControl";
 import { PlaybackPermissions } from "./PlaybackPermissions";
 
 interface LeftProps {
@@ -27,9 +23,6 @@ interface LeftProps {
 
 export const Left = ({ className, hideUploader = false, roomLabel }: LeftProps) => {
   const roomId = useRoomStore((state) => state.roomId);
-  const clockOffset = useGlobalStore((state) => state.offsetEstimate);
-  const roundTripEstimate = useGlobalStore((state) => state.roundTripEstimate);
-  const syncMeasurementCount = useGlobalStore((state) => state.syncMeasurements.length);
 
   return (
     <motion.div
@@ -72,29 +65,14 @@ export const Left = ({ className, hideUploader = false, roomLabel }: LeftProps) 
 
       <Separator className="bg-neutral-800/50" />
 
-      <div className="flex items-center gap-3 px-3.5 py-2 text-[10px] font-mono text-neutral-500 lg:hidden">
-        <span>Offset: {clockOffset.toFixed(1)}ms</span>
-        <span>RTT: {roundTripEstimate.toFixed(1)}ms</span>
-        <span>OL: {((audioContextManager.getContext().outputLatency ?? 0) * 1000).toFixed(0)}ms</span>
-        <span>
-          NTP: {syncMeasurementCount}/{MAX_NTP_MEASUREMENTS}
-        </span>
-      </div>
-
-      <Separator className="bg-neutral-800/50" />
-
       <PlaybackPermissions />
 
       <Separator className="bg-neutral-800/50" />
 
-      <BluetoothDelayControl />
-
-      <Separator className="bg-neutral-800/50" />
-
-      <div className="block lg:hidden">
-        <GlobalVolumeControl isMobile />
-        <Separator className="bg-neutral-800/50" />
-        <MobileNudgeControl />
+      {/* Desktop keeps the audio-output delay control here; on mobile it lives
+          in the Settings tab (SettingsPanel) instead. */}
+      <div className="hidden lg:block">
+        <BluetoothDelayControl />
         <Separator className="bg-neutral-800/50" />
       </div>
 
