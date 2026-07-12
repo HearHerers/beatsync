@@ -2,18 +2,20 @@
 // Root shell for map rooms.
 //
 // Desktop layout — three horizontally-resizable panels; the center is a
-// vertically-resizable Map/Playlist stack. Every panel is collapsible.
+// vertically-resizable Map/Playlist stack. Every panel is collapsible via
+// its chevron/rail or the Users/Map/Playlist/Chat toggles rendered into the
+// TopBar's status row.
 //
-//   ┌─ TopBar ──────────────────────────────────────────────────────────┐
+//   ┌─ TopBar ─────────────────── Users/Map/Playlist/Chat ─ socials ────┐
 //   ├─────┬──────────────────────┬──────┐
 //   │ Left│        Map           │ Right│
 //   │users│ ─────────────────── ─│ chat │   <- ResizableHandles between
 //   │     │      Playlist        │      │      every adjacent pair
 //   └─────┴──────────────────────┴──────┘
 //
-// Mobile layout — a top toolbar of four toggles (Users / Map / Playlist /
-// Chat). Each toggle shows or hides its section in the vertical stack
-// below; multiple expanded sections share the available height.
+// Mobile layout — a top toolbar of five toggles (Users / Map / Playlist /
+// Chat / Settings). Each toggle shows or hides its section in the vertical
+// stack below; multiple expanded sections share the available height.
 //
 // All audio-room components (TopBar, Left, Right, Queue, AudioUploaderMinimal)
 // are reused; the Queue + Uploader are parameterized by contextId == shape.id
@@ -57,6 +59,28 @@ import { MapShapePanel } from "./MapShapePanel";
 
 interface MapRoomProps {
   roomId: string;
+}
+
+// Shared handle for one desktop panel: the imperative resizable-panel ref plus
+// a mirrored collapsed flag. Lifted into MapRoom so the TopBar toggles and
+// DesktopLayout's chevrons/rails drive the same state.
+interface PanelControl {
+  ref: ReturnType<typeof usePanelRef>;
+  collapsed: boolean;
+  setCollapsed: (v: boolean) => void;
+}
+
+const usePanelControl = (): PanelControl => {
+  const ref = usePanelRef();
+  const [collapsed, setCollapsed] = useState(false);
+  return { ref, collapsed, setCollapsed };
+};
+
+interface DesktopPanels {
+  users: PanelControl;
+  map: PanelControl;
+  playlist: PanelControl;
+  chat: PanelControl;
 }
 
 export const MapRoom = ({ roomId }: MapRoomProps) => {
@@ -149,6 +173,43 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
     visible: { opacity: 1, transition: { duration: 0.5, staggerChildren: 0.1 } },
   };
 
+  const desktopPanels: DesktopPanels = {
+    users: usePanelControl(),
+    map: usePanelControl(),
+    playlist: usePanelControl(),
+    chat: usePanelControl(),
+  };
+
+  // Desktop panel toggles — rendered inside the TopBar's status row. Same
+  // on/off affordance as the mobile toolbar, driving the same panel refs as
+  // the collapse chevrons/rails. Ref access stays inside the inline onClick
+  // handlers (the react-compiler lint rule rejects refs captured in closures
+  // built during render).
+  const panelControls = (
+    <div className="hidden lg:flex items-center gap-1">
+      {[
+        { label: "Users", icon: <Users className="size-3" />, panel: desktopPanels.users },
+        { label: "Map", icon: <MapIcon className="size-3" />, panel: desktopPanels.map },
+        { label: "Playlist", icon: <ListMusic className="size-3" />, panel: desktopPanels.playlist },
+        { label: "Chat", icon: <MessageCircle className="size-3" />, panel: desktopPanels.chat },
+      ].map(({ label, icon, panel }) => (
+        <Button
+          key={label}
+          size="sm"
+          variant={panel.collapsed ? "outline" : "default"}
+          className="h-6 px-2 text-[11px]"
+          onClick={() =>
+            panel.ref.current?.isCollapsed() ? panel.ref.current?.expand() : panel.ref.current?.collapse()
+          }
+          title={`${panel.collapsed ? "Show" : "Hide"} ${label}`}
+        >
+          <span className="mr-1">{icon}</span>
+          {label}
+        </Button>
+      ))}
+    </div>
+  );
+
   const overlays = (
     <MapOverlays
       locationMode={locationMode}
@@ -165,7 +226,7 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
 
   return (
     <div className="flex h-dvh w-full flex-col bg-neutral-950 text-white">
-      <TopBar roomId={roomId} />
+      <TopBar roomId={roomId} panelControls={isReady ? panelControls : undefined} />
 
       {!isSynced && hasUserStartedSystem && !isLoadingAudio && <SyncProgress />}
 
@@ -178,7 +239,7 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
         >
           {/* Desktop / wide layout — resizable + collapsible. */}
           <div className="hidden lg:flex lg:flex-1 lg:overflow-hidden min-h-0">
-            <DesktopLayout canMutate={canMutate} overlays={overlays} />
+            <DesktopLayout canMutate={canMutate} overlays={overlays} panels={desktopPanels} />
           </div>
 
           {/* Mobile / narrow layout — toggleable panels, no resizing. */}
@@ -206,16 +267,15 @@ interface PaneProps {
   overlays: React.ReactNode;
 }
 
-const DesktopLayout = ({ canMutate, overlays }: PaneProps) => {
-  const leftRef = usePanelRef();
-  const rightRef = usePanelRef();
-  const mapRef = usePanelRef();
-  const playlistRef = usePanelRef();
+interface DesktopLayoutProps extends PaneProps {
+  panels: DesktopPanels;
+}
 
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
-  const [mapCollapsed, setMapCollapsed] = useState(false);
-  const [playlistCollapsed, setPlaylistCollapsed] = useState(false);
+const DesktopLayout = ({ canMutate, overlays, panels }: DesktopLayoutProps) => {
+  const { ref: leftRef, collapsed: leftCollapsed, setCollapsed: setLeftCollapsed } = panels.users;
+  const { ref: mapRef, collapsed: mapCollapsed, setCollapsed: setMapCollapsed } = panels.map;
+  const { ref: playlistRef, collapsed: playlistCollapsed, setCollapsed: setPlaylistCollapsed } = panels.playlist;
+  const { ref: rightRef, collapsed: rightCollapsed, setCollapsed: setRightCollapsed } = panels.chat;
 
   // Layout persistence — survives page reloads via localStorage.
   const horizontal = useDefaultLayout({
