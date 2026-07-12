@@ -12,7 +12,7 @@ import { arrayMove, SortableContext, verticalListSortingStrategy } from "@dnd-ki
 import { cn } from "@/lib/utils";
 import { AudioSourceState, useCanMutate, useGlobalStore } from "@/store/global";
 import { MAIN_CONTEXT_ID } from "@beatsync/shared";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import React from "react";
 import LoadDefaultTracksButton from "./LoadDefaultTracksButton";
 import { QueueSortableItem } from "./QueueSortableItem";
@@ -82,33 +82,29 @@ export const Queue = ({ className, contextId = MAIN_CONTEXT_ID, ...rest }: Queue
               modifiers={[restrictToVerticalAxis, restrictToWindowEdges]}
             >
               <SortableContext items={items.map((src) => src.source.url)} strategy={verticalListSortingStrategy}>
-                <AnimatePresence initial={true}>
-                  {items.map((sourceState, index) => (
-                    <QueueSortableItem
-                      key={sourceState.source.url}
-                      id={sourceState.source.url}
-                      sourceState={sourceState}
-                      index={index}
-                      canMutate={canMutate}
-                      contextId={contextId}
-                    />
-                  ))}
-                </AnimatePresence>
+                {items.map((sourceState, index) => (
+                  <QueueSortableItem
+                    key={sourceState.source.url}
+                    id={sourceState.source.url}
+                    sourceState={sourceState}
+                    index={index}
+                    canMutate={canMutate}
+                    contextId={contextId}
+                  />
+                ))}
               </SortableContext>
             </DndContext>
           ) : (
-            <AnimatePresence initial={true}>
-              {items.map((sourceState, index) => (
-                <QueueSortableItem
-                  key={sourceState.source.url}
-                  id={sourceState.source.url}
-                  sourceState={sourceState}
-                  index={index}
-                  canMutate={canMutate}
-                  contextId={contextId}
-                />
-              ))}
-            </AnimatePresence>
+            items.map((sourceState, index) => (
+              <QueueSortableItem
+                key={sourceState.source.url}
+                id={sourceState.source.url}
+                sourceState={sourceState}
+                index={index}
+                canMutate={canMutate}
+                contextId={contextId}
+              />
+            ))
           )
         ) : (
           <motion.div
