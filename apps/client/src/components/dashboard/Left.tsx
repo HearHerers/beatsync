@@ -1,8 +1,6 @@
 "use client";
 
-import { audioContextManager } from "@/lib/audioContextManager";
 import { cn } from "@/lib/utils";
-import { MAX_NTP_MEASUREMENTS, useGlobalStore } from "@/store/global";
 import { useRoomStore } from "@/store/room";
 import { Hash } from "lucide-react";
 import { motion } from "motion/react";
@@ -11,25 +9,23 @@ import { Separator } from "../ui/separator";
 import { BluetoothDelayControl } from "./BluetoothDelayControl";
 import { ConnectedUsersList } from "./ConnectedUsersList";
 import { RoomQRCode } from "./CopyRoom";
-import { GlobalVolumeControl } from "./GlobalVolumeControl";
-import { MobileNudgeControl } from "./MobileNudgeControl";
 import { PlaybackPermissions } from "./PlaybackPermissions";
 
 interface LeftProps {
   className?: string;
   /** When true, omit the bottom audio uploader (map rooms move upload to each
-   *  shape's playlist column). Tips section still renders. */
+   *  shape's playlist column). */
   hideUploader?: boolean;
+  /** When true, omit the desktop audio-output delay control (map rooms show it
+   *  in their dedicated Settings panel instead). */
+  hideDelayControl?: boolean;
   /** Override the room header label. When set, the `#` icon is hidden and the
    *  label renders as `{roomLabel} {roomId}` (e.g. map rooms use "HearHere room"). */
   roomLabel?: string;
 }
 
-export const Left = ({ className, hideUploader = false, roomLabel }: LeftProps) => {
+export const Left = ({ className, hideUploader = false, hideDelayControl = false, roomLabel }: LeftProps) => {
   const roomId = useRoomStore((state) => state.roomId);
-  const clockOffset = useGlobalStore((state) => state.offsetEstimate);
-  const roundTripEstimate = useGlobalStore((state) => state.roundTripEstimate);
-  const syncMeasurementCount = useGlobalStore((state) => state.syncMeasurements.length);
 
   return (
     <motion.div
@@ -72,31 +68,18 @@ export const Left = ({ className, hideUploader = false, roomLabel }: LeftProps) 
 
       <Separator className="bg-neutral-800/50" />
 
-      <div className="flex items-center gap-3 px-3.5 py-2 text-[10px] font-mono text-neutral-500 lg:hidden">
-        <span>Offset: {clockOffset.toFixed(1)}ms</span>
-        <span>RTT: {roundTripEstimate.toFixed(1)}ms</span>
-        <span>OL: {((audioContextManager.getContext().outputLatency ?? 0) * 1000).toFixed(0)}ms</span>
-        <span>
-          NTP: {syncMeasurementCount}/{MAX_NTP_MEASUREMENTS}
-        </span>
-      </div>
-
-      <Separator className="bg-neutral-800/50" />
-
       <PlaybackPermissions />
 
       <Separator className="bg-neutral-800/50" />
 
-      <BluetoothDelayControl />
-
-      <Separator className="bg-neutral-800/50" />
-
-      <div className="block lg:hidden">
-        <GlobalVolumeControl isMobile />
-        <Separator className="bg-neutral-800/50" />
-        <MobileNudgeControl />
-        <Separator className="bg-neutral-800/50" />
-      </div>
+      {/* Desktop audio rooms keep the audio-output delay control here; map
+          rooms and mobile show it in their Settings panel/tab instead. */}
+      {!hideDelayControl && (
+        <div className="hidden lg:block">
+          <BluetoothDelayControl />
+          <Separator className="bg-neutral-800/50" />
+        </div>
+      )}
 
       {/* Connected Users List */}
       <ConnectedUsersList />
@@ -105,15 +88,7 @@ export const Left = ({ className, hideUploader = false, roomLabel }: LeftProps) 
 
       {/* <Separator className="bg-neutral-800/50" /> */}
 
-      {/* Tips Section */}
       <motion.div className="mt-auto pb-4 pt-2 text-neutral-400">
-        <div className="flex flex-col gap-2 p-4 border-t border-neutral-800/50">
-          <h5 className="text-xs font-medium text-neutral-300">Tips</h5>
-          <ul className="list-disc list-outside pl-4 space-y-1.5">
-            <li className="text-xs leading-relaxed">{"Play on speaker directly. Don't use Bluetooth."}</li>
-          </ul>
-        </div>
-
         {!hideUploader && (
           <div className="pl-1">
             <AudioUploaderMinimal />
