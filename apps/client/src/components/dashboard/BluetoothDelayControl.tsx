@@ -24,7 +24,7 @@ interface Preset {
 
 // Common codec latencies — rough averages from public measurements.
 const PRESETS: Preset[] = [
-  { label: "Wired / speakers", delayMs: 0, hint: "no compensation" },
+  { label: "Wired / speakers (no offset)", delayMs: 0, hint: "no compensation" },
   { label: "LE Audio (LC3)", delayMs: 25 },
   { label: "aptX LL / Bose QC", delayMs: 40 },
   { label: "aptX", delayMs: 100 },
@@ -90,7 +90,7 @@ export const BluetoothDelayControl = () => {
       {/* Free slider for arbitrary values. Click in here = "Custom". */}
       <div className="space-y-1">
         <div className="flex items-center justify-between text-[10px] text-neutral-500">
-          <span>Custom</span>
+          <span>Custom timing offset</span>
           {isCustom && <span className="font-mono text-neutral-300">{currentDelayMs}ms</span>}
         </div>
         <Slider
