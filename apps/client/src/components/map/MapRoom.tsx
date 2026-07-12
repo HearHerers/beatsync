@@ -1,17 +1,17 @@
 "use client";
 // Root shell for map rooms.
 //
-// Desktop layout — three horizontally-resizable panels; the center is a
+// Desktop layout — four horizontally-resizable panels; the center is a
 // vertically-resizable Map/Playlist stack. Every panel is collapsible via
-// its chevron/rail or the Users/Map/Playlist/Chat toggles rendered into the
-// TopBar's status row.
+// its chevron/rail or the Users/Map/Playlist/Chat/Settings toggles rendered
+// into the TopBar's status row. Settings starts collapsed.
 //
-//   ┌─ TopBar ─────────────────── Users/Map/Playlist/Chat ─ socials ────┐
-//   ├─────┬──────────────────────┬──────┐
-//   │ Left│        Map           │ Right│
-//   │users│ ─────────────────── ─│ chat │   <- ResizableHandles between
-//   │     │      Playlist        │      │      every adjacent pair
-//   └─────┴──────────────────────┴──────┘
+//   ┌─ TopBar ────────── Users/Map/Playlist/Chat/Settings ─ socials ────┐
+//   ├─────┬──────────────────────┬──────┬────────┐
+//   │ Left│        Map           │ Right│Settings│  <- ResizableHandles
+//   │users│ ─────────────────── ─│ chat │        │     between every
+//   │     │      Playlist        │      │        │     adjacent pair
+//   └─────┴──────────────────────┴──────┴────────┘
 //
 // Mobile layout — a top toolbar of five toggles (Users / Map / Playlist /
 // Chat / Settings). Each toggle shows or hides its section in the vertical
@@ -81,6 +81,7 @@ interface DesktopPanels {
   map: PanelControl;
   playlist: PanelControl;
   chat: PanelControl;
+  settings: PanelControl;
 }
 
 export const MapRoom = ({ roomId }: MapRoomProps) => {
@@ -178,6 +179,7 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
     map: usePanelControl(),
     playlist: usePanelControl(),
     chat: usePanelControl(),
+    settings: usePanelControl(),
   };
 
   // Desktop panel toggles — rendered inside the TopBar's status row. Same
@@ -192,6 +194,7 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
         { label: "Map", icon: <MapIcon className="size-3" />, panel: desktopPanels.map },
         { label: "Playlist", icon: <ListMusic className="size-3" />, panel: desktopPanels.playlist },
         { label: "Chat", icon: <MessageCircle className="size-3" />, panel: desktopPanels.chat },
+        { label: "Settings", icon: <Settings className="size-3" />, panel: desktopPanels.settings },
       ].map(({ label, icon, panel }) => (
         <Button
           key={label}
@@ -258,7 +261,7 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
 };
 
 // ── Desktop layout ────────────────────────────────────────────────────
-// Three horizontally-resizable panels: Left (users) | center | Right (chat).
+// Four horizontally-resizable panels: Left (users) | center | Chat | Settings.
 // Center is a vertically-resizable Map/Playlist stack. Each panel is
 // collapsible to a thin rail showing only an expand icon. Sizes persist
 // across reloads via react-resizable-panels' autoSaveId.
@@ -276,11 +279,14 @@ const DesktopLayout = ({ canMutate, overlays, panels }: DesktopLayoutProps) => {
   const { ref: mapRef, collapsed: mapCollapsed, setCollapsed: setMapCollapsed } = panels.map;
   const { ref: playlistRef, collapsed: playlistCollapsed, setCollapsed: setPlaylistCollapsed } = panels.playlist;
   const { ref: rightRef, collapsed: rightCollapsed, setCollapsed: setRightCollapsed } = panels.chat;
+  const { ref: settingsRef, collapsed: settingsCollapsed, setCollapsed: setSettingsCollapsed } = panels.settings;
 
-  // Layout persistence — survives page reloads via localStorage.
+  // Layout persistence — survives page reloads via localStorage. The id is
+  // versioned: bump it whenever the panel list changes so a stale persisted
+  // layout can't be applied to a different set of panels.
   const horizontal = useDefaultLayout({
-    id: "mapRoom.horizontal",
-    panelIds: ["left", "center", "right"],
+    id: "mapRoom.horizontal.v2",
+    panelIds: ["left", "center", "right", "settings"],
   });
   const vertical = useDefaultLayout({
     id: "mapRoom.vertical",
@@ -316,14 +322,14 @@ const DesktopLayout = ({ canMutate, overlays, panels }: DesktopLayoutProps) => {
             onCollapse={() => leftRef.current?.collapse()}
             side="left"
           >
-            <Left className="flex h-full w-full lg:w-full" hideUploader roomLabel="HearHere room" />
+            <Left className="flex h-full w-full lg:w-full" hideUploader hideDelayControl roomLabel="HearHere room" />
           </PanelShell>
         )}
       </ResizablePanel>
 
       <ResizableHandle orientation="horizontal" withHandle />
 
-      <ResizablePanel id="center" minSize="30%" defaultSize="60%">
+      <ResizablePanel id="center" minSize="30%" defaultSize="55%">
         <ResizablePanelGroup
           orientation="vertical"
           defaultLayout={vertical.defaultLayout}
@@ -413,6 +419,38 @@ const DesktopLayout = ({ canMutate, overlays, panels }: DesktopLayoutProps) => {
             side="right"
           >
             <Right chatOnly className="w-full lg:w-full border-l-0" />
+          </PanelShell>
+        )}
+      </ResizablePanel>
+
+      <ResizableHandle orientation="horizontal" withHandle />
+
+      {/* Settings — starts collapsed (defaultSize == collapsedSize); expand via
+          the rail, or the TopBar toggle. */}
+      <ResizablePanel
+        id="settings"
+        panelRef={settingsRef}
+        collapsible
+        collapsedSize="40px"
+        minSize="14%"
+        defaultSize="40px"
+        onResize={() => setSettingsCollapsed(settingsRef.current?.isCollapsed() ?? false)}
+      >
+        {settingsCollapsed ? (
+          <CollapsedRail
+            label="Settings"
+            icon={<Settings className="size-3.5" />}
+            onClick={() => settingsRef.current?.expand()}
+            side="right"
+          />
+        ) : (
+          <PanelShell
+            label="Settings"
+            icon={<Settings className="size-3.5" />}
+            onCollapse={() => settingsRef.current?.collapse()}
+            side="right"
+          >
+            <SettingsPanel className="h-full" />
           </PanelShell>
         )}
       </ResizablePanel>

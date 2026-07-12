@@ -16,12 +16,15 @@ interface LeftProps {
   /** When true, omit the bottom audio uploader (map rooms move upload to each
    *  shape's playlist column). */
   hideUploader?: boolean;
+  /** When true, omit the desktop audio-output delay control (map rooms show it
+   *  in their dedicated Settings panel instead). */
+  hideDelayControl?: boolean;
   /** Override the room header label. When set, the `#` icon is hidden and the
    *  label renders as `{roomLabel} {roomId}` (e.g. map rooms use "HearHere room"). */
   roomLabel?: string;
 }
 
-export const Left = ({ className, hideUploader = false, roomLabel }: LeftProps) => {
+export const Left = ({ className, hideUploader = false, hideDelayControl = false, roomLabel }: LeftProps) => {
   const roomId = useRoomStore((state) => state.roomId);
 
   return (
@@ -69,12 +72,14 @@ export const Left = ({ className, hideUploader = false, roomLabel }: LeftProps) 
 
       <Separator className="bg-neutral-800/50" />
 
-      {/* Desktop keeps the audio-output delay control here; on mobile it lives
-          in the Settings tab (SettingsPanel) instead. */}
-      <div className="hidden lg:block">
-        <BluetoothDelayControl />
-        <Separator className="bg-neutral-800/50" />
-      </div>
+      {/* Desktop audio rooms keep the audio-output delay control here; map
+          rooms and mobile show it in their Settings panel/tab instead. */}
+      {!hideDelayControl && (
+        <div className="hidden lg:block">
+          <BluetoothDelayControl />
+          <Separator className="bg-neutral-800/50" />
+        </div>
+      )}
 
       {/* Connected Users List */}
       <ConnectedUsersList />
