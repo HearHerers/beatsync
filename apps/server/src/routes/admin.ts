@@ -21,7 +21,7 @@
 // the operator action immediately.
 
 import { isOperator } from "@/admin/auth";
-import { addTombstone } from "@/admin/registry";
+import { addTombstone, addTombstones } from "@/admin/registry";
 import { IS_DEMO_MODE } from "@/demo";
 import { deleteObjectsWithPrefix } from "@/lib/r2";
 import { BackupManager } from "@/managers/BackupManager";
@@ -48,6 +48,31 @@ export async function handleAdmin(req: Request, url: URL): Promise<Response> {
     globalManager.forEachRoom(() => rooms++);
     console.log(`🛠️ Operator triggered an on-demand state backup (${rooms} room(s)).`);
     return json({ ok: true, rooms });
+  }
+
+  // Purge: wipe EVERY room — state, R2 audio (including orphaned room-* audio
+  // with no resident room), tombstones for all resident ids, then a fresh empty
+  // backup. Requires an explicit ?confirm=all so a stray collection-DELETE
+  // can't nuke the server.
+  if (req.method === "DELETE" && url.pathname === "/admin/rooms") {
+    if (url.searchParams.get("confirm") !== "all") {
+      return json({ ok: false, error: "Purge requires ?confirm=all" }, 400);
+    }
+    const roomIds: string[] = [];
+    globalManager.forEachRoom((_room, id) => roomIds.push(id));
+    for (const id of roomIds) {
+      const r = globalManager.getRoom(id);
+      if (!r) continue;
+      r.evictAllClients("Room purged by operator");
+      await r.cleanup(); // stops intervals + deletes R2 `room-{id}` objects
+      globalManager.deleteRoom(id);
+    }
+    // Sweep orphaned audio from rooms that were not resident.
+    const { deletedCount } = await deleteObjectsWithPrefix("room-");
+    await addTombstones(roomIds);
+    await backupNow();
+    console.log(`🛠️ Operator purged ALL rooms (${roomIds.length} resident, ${deletedCount} orphaned R2 objects swept)`);
+    return json({ ok: true, purgedRooms: roomIds.length, orphanedObjectsDeleted: deletedCount });
   }
 
   // /admin/rooms/:id[/action] — room ids are simple tokens (6-digit codes);
