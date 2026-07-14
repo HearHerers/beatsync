@@ -14,9 +14,13 @@ import { SyncProgress } from "../ui/SyncProgress";
 
 interface TopBarProps {
   roomId: string;
+  /** Optional room-specific controls rendered on the right, before the social
+   *  links (e.g. map rooms put their desktop panel toggles here). Only shown
+   *  in the synced state. */
+  panelControls?: React.ReactNode;
 }
 
-export const TopBar = ({ roomId }: TopBarProps) => {
+export const TopBar = ({ roomId, panelControls }: TopBarProps) => {
   const isLoadingAudio = useGlobalStore((state) => state.isInitingSystem);
   const isSynced = useGlobalStore((state) => state.isSynced);
   const roundTripEstimate = useGlobalStore((state) => state.roundTripEstimate);
@@ -96,6 +100,7 @@ export const TopBar = ({ roomId }: TopBarProps) => {
         </div>
 
         <div className="flex items-center justify-center gap-2.5">
+          {panelControls}
           {/* Discord icon */}
           <a
             href={SOCIAL_LINKS.discord}

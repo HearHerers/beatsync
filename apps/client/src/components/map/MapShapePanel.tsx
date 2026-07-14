@@ -17,12 +17,16 @@ import { AudioUploaderMinimal } from "@/components/AudioUploaderMinimal";
 import { Queue } from "@/components/Queue";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
+import { exportPlaylistToFile, parsePlaylistFile } from "@/lib/playlistFile";
+import { zoneDisplayName } from "@/lib/zoneName";
 import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
+import { useRoomStore } from "@/store/room";
 import { sendWSRequest } from "@/utils/ws";
 import { ClientActionEnum, MAP_CONSTANTS } from "@beatsync/shared";
-import { Repeat, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { Download, Repeat, Trash2, Upload } from "lucide-react";
+import { useRef, useState } from "react";
+import { toast } from "sonner";
 
 interface MapShapePanelProps {
   canMutate: boolean;
@@ -33,6 +37,8 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
   const selectedShapeId = useMapStore((s) => s.selectedShapeId);
   const playlist = useGlobalStore((s) => (selectedShapeId ? s.playlists.get(selectedShapeId) : undefined));
   const isConnected = useGlobalStore((s) => s.socket?.readyState === WebSocket.OPEN);
+  const roomId = useRoomStore((s) => s.roomId);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const shape = selectedShapeId ? shapes.get(selectedShapeId) : undefined;
 
@@ -69,12 +75,35 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
     sendWSRequest({ ws: socket, request: req });
   };
 
+  const handleExport = () => {
+    if (!playlist || playlist.tracks.length === 0) {
+      toast.error("This zone has no tracks to export.");
+      return;
+    }
+    exportPlaylistToFile(playlist, { roomId, label: `zone-${shape.id.slice(0, 6)}` });
+  };
+
+  const handleImportFile = async (file: File) => {
+    try {
+      const doc = await parsePlaylistFile(file);
+      const urls = doc.tracks.map((t) => t.url);
+      if (urls.length === 0) {
+        toast.error("That playlist file has no tracks.");
+        return;
+      }
+      send({ type: ClientActionEnum.enum.IMPORT_TRACKS_TO_CONTEXT, contextId: shape.id, urls });
+      toast.success(`Importing ${urls.length} track${urls.length === 1 ? "" : "s"}…`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not import that file.");
+    }
+  };
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between gap-2 border-b border-neutral-800/50 px-4 py-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-neutral-100">Zone {shape.id.slice(0, 6)}</div>
+        <div className="min-w-0 flex-1">
+          <ShapeNameEditor shape={shape} canMutate={canMutate} send={send} />
           <div className="text-[11px] text-neutral-500">{shape.type}</div>
         </div>
         {canMutate && (
@@ -96,6 +125,39 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
             >
               <Repeat className="size-3.5" />
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-1.5 text-neutral-500 hover:text-neutral-200"
+              title="Export this zone's playlist"
+              disabled={!playlist || playlist.tracks.length === 0}
+              onClick={handleExport}
+            >
+              <Download className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-1.5 text-neutral-500 hover:text-neutral-200"
+              title="Import a playlist into this zone"
+              disabled={!isConnected}
+              onClick={() => importInputRef.current?.click()}
+            >
+              <Upload className="size-3.5" />
+            </Button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = ""; // allow re-importing the same file
+                if (file) void handleImportFile(file);
+              }}
+            />
             <Button
               type="button"
               size="sm"
@@ -152,3 +214,72 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
     </div>
   );
 };
+
+/**
+ * Inline editable shape name. Mutators see a click-to-edit pencil; non-mutators
+ * see the static label. Enter / blur commits, Esc cancels, empty commits clear
+ * the name (which falls back to the zoneDisplayName id-based default).
+ */
+function ShapeNameEditor({
+  shape,
+  canMutate,
+  send,
+}: {
+  shape: { id: string; name?: string };
+  canMutate: boolean;
+  send: (req: Parameters<typeof sendWSRequest>[0]["request"]) => void;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const fallback = zoneDisplayName({ id: shape.id });
+  const displayed = zoneDisplayName(shape);
+
+  const startEdit = () => {
+    if (!canMutate) return;
+    setDraft(shape.name ?? "");
+    setIsEditing(true);
+  };
+  const commit = () => {
+    setIsEditing(false);
+    const next = draft.trim();
+    if (next === (shape.name ?? "")) return;
+    send({ type: ClientActionEnum.enum.SET_SHAPE_NAME, shapeId: shape.id, name: next });
+  };
+  const cancel = () => {
+    setIsEditing(false);
+    setDraft("");
+  };
+
+  if (isEditing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        maxLength={80}
+        placeholder={fallback}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            cancel();
+          }
+        }}
+        className="w-full bg-transparent border border-neutral-700 rounded px-1.5 py-0.5 text-sm font-semibold text-neutral-100 outline-none focus:border-neutral-500"
+      />
+    );
+  }
+
+  return (
+    <div
+      onClick={startEdit}
+      className={`truncate text-sm font-semibold text-neutral-100 ${canMutate ? "cursor-pointer hover:text-white" : ""}`}
+      title={canMutate ? "Click to rename zone" : undefined}
+    >
+      {displayed}
+    </div>
+  );
+}

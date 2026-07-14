@@ -24,7 +24,7 @@ export const MobileNudgeControl = () => {
       <div className="flex items-center justify-between px-4 pt-3">
         <h2 className="text-xs font-medium uppercase tracking-wider text-neutral-500 flex items-center gap-2">
           <Timer className="h-3.5 w-3.5" />
-          <span>Timing Nudge</span>
+          <span>Timing Offset Nudge</span>
         </h2>
         <button
           className="text-[10px] font-mono text-neutral-500 px-2 py-0.5 rounded bg-neutral-800 active:bg-neutral-700 transition-colors"
