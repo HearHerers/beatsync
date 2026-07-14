@@ -98,6 +98,9 @@ const RoomBackupSchema = z.object({
     .optional(),
   /** Per-context playlist state — single source of truth for room audio. */
   playlists: z.array(PlaylistBackupSchema),
+  /** Display name for the room, set by an admin. Audio rooms and map rooms both
+   *  use it — UI falls back to "Room <id>" when unset. */
+  roomName: z.string().optional(),
   /** Map-room state. Only meaningful when roomType === "map". */
   roomType: RoomTypeEnum.optional(),
   mapMetadata: MapMetadataSchema.optional(),
@@ -255,6 +258,7 @@ export class RoomManager {
   // id = shape.id (the playlist holds its tracks + playback state).
   private roomType: RoomTypeValue = "audio";
   private mapMetadata?: MapMetadataType;
+  private roomName?: string;
   // Admin-chosen room-wide default base map. Undefined = clients use their
   // build default (Mapbox if a token is set, else Esri).
   private defaultTileLayerId?: MapTileLayerId;
@@ -1471,6 +1475,7 @@ export class RoomManager {
         loop: p.loop,
         playbackState: { ...p.playback },
       })),
+      ...(this.roomName && { roomName: this.roomName }),
       ...(this.roomType !== "audio" && { roomType: this.roomType }),
       ...(this.mapMetadata && { mapMetadata: this.mapMetadata }),
       ...(this.defaultTileLayerId && { defaultTileLayerId: this.defaultTileLayerId }),
@@ -1503,6 +1508,15 @@ export class RoomManager {
       this.shapes.clear();
       for (const s of backup.shapes) this.shapes.set(s.id, s);
     }
+  }
+
+  /** Display name for the room. Empty string clears it (UI falls back to "Room <id>"). */
+  getRoomName(): string | undefined {
+    return this.roomName;
+  }
+  setRoomName(name: string): void {
+    const trimmed = name.trim().slice(0, 80);
+    this.roomName = trimmed.length === 0 ? undefined : trimmed;
   }
 
   /**
