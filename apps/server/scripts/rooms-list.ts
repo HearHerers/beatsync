@@ -1,14 +1,16 @@
 // List all persisted rooms from the latest R2 state backup (offline — does not
 // need the server to be running).
 //
-//   bun run rooms:list [--json]
+//   bun run rooms:list [--json] [--sync]
 //
 // One row per room: id, name, type, zones, tracks, chat messages, cached
 // clients, admin-token presence. Data reflects the last backup (every 60s + on
-// last disconnect), so it is at most ~60s stale while the server runs. See
-// OPERATOR_ROOM_MANAGEMENT.md (project root) — this is Phase 0.
+// last disconnect), so it is at most ~60s stale while the server runs; pass
+// --sync to have the running server write a fresh backup first (needs
+// OPERATOR_SECRET in .env). See OPERATOR_ROOM_MANAGEMENT.md (project root) —
+// this is Phase 0.
 
-import { loadLatestBackup, summarizeRoom } from "./lib/backupSnapshot";
+import { loadLatestBackup, requestSyncBackup, summarizeRoom } from "./lib/backupSnapshot";
 
 function pad(value: string, width: number): string {
   return value.length >= width ? value : value + " ".repeat(width - value.length);
@@ -16,6 +18,15 @@ function pad(value: string, width: number): string {
 
 async function main() {
   const json = process.argv.includes("--json");
+
+  if (process.argv.includes("--sync")) {
+    try {
+      await requestSyncBackup();
+    } catch (err) {
+      console.error(`⚠️ Sync failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.error("   Reading the latest existing snapshot instead.\n");
+    }
+  }
 
   const { key, ageMinutes, backup } = await loadLatestBackup();
   const summaries = Object.entries(backup.data.rooms)

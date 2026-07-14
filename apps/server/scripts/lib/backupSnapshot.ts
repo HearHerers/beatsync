@@ -16,6 +16,34 @@ export interface BackupSnapshot {
   backup: ServerBackupType;
 }
 
+// Ask the running server to write a fresh backup right now (POST /admin/backup
+// with the OPERATOR_SECRET bearer), so the snapshot we then read reflects
+// current state instead of being up to ~60s stale. Requires OPERATOR_SECRET in
+// the environment — apps/server/.env is shared between the server and these
+// scripts — and the server to be reachable at SERVER_URL (default
+// http://localhost:8080).
+export async function requestSyncBackup(): Promise<void> {
+  const secret = process.env.OPERATOR_SECRET ?? "";
+  if (!secret) {
+    throw new Error("OPERATOR_SECRET is not set. Add it to apps/server/.env (server and scripts share it).");
+  }
+  const base = (process.env.SERVER_URL ?? "http://localhost:8080").replace(/\/$/, "");
+  let res: Response;
+  try {
+    res = await fetch(`${base}/admin/backup`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${secret}` },
+    });
+  } catch (err) {
+    throw new Error(`Could not reach ${base} (${err instanceof Error ? err.message : String(err)}).`);
+  }
+  if (!res.ok) {
+    throw new Error(
+      `${base}/admin/backup returned ${res.status}. Is the server running with the same OPERATOR_SECRET?`
+    );
+  }
+}
+
 export async function loadLatestBackup(): Promise<BackupSnapshot> {
   const r2 = validateR2Config();
   if (!r2.isValid) {
