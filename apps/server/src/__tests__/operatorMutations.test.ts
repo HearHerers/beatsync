@@ -147,6 +147,35 @@ describe("operator archive / delete", () => {
     expect(deletedPrefixes).not.toContain("room-100005");
   });
 
+  it("purge requires ?confirm=all", async () => {
+    globalManager.getOrCreateRoom("100010");
+    const res = await handleAdmin(...adminReq("/admin/rooms", "DELETE"));
+    expect(res.status).toBe(400);
+    expect(globalManager.getRoom("100010")).toBeDefined();
+  });
+
+  it("purge wipes every room, sweeps orphaned audio, tombstones all, and backs up empty", async () => {
+    globalManager.getOrCreateRoom("100011");
+    globalManager.getOrCreateRoom("100012");
+
+    const res = await handleAdmin(...adminReq("/admin/rooms?confirm=all", "DELETE"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; purgedRooms: number };
+    expect(body.purgedRooms).toBe(2);
+
+    expect(globalManager.getRoomIds()).toHaveLength(0);
+    expect(deletedPrefixes).toContain("room-100011");
+    expect(deletedPrefixes).toContain("room-100012");
+    expect(deletedPrefixes).toContain("room-"); // orphan sweep
+
+    const registry = store["operator/registry.json"] as { tombstones: Record<string, number> };
+    expect(Object.keys(registry.tombstones).sort()).toEqual(["100011", "100012"]);
+
+    const backupKey = Object.keys(store).find((k) => k.startsWith("state-backup/"))!;
+    const backup = store[backupKey] as { data: { rooms: Record<string, unknown> } };
+    expect(Object.keys(backup.data.rooms)).toHaveLength(0);
+  });
+
   it("restore preserves the archived flag", async () => {
     store["state-backup/backup-arch.json"] = {
       timestamp: Date.now(),

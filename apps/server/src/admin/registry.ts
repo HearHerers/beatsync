@@ -52,10 +52,17 @@ export function isTombstonedAt(roomId: string, backupTimestamp: number): boolean
 }
 
 export async function addTombstone(roomId: string): Promise<void> {
+  await addTombstones([roomId]);
+}
+
+/** Tombstone many rooms with a single registry write (operator purge). */
+export async function addTombstones(roomIds: string[]): Promise<void> {
+  if (roomIds.length === 0) return;
   if (tombstones === null) await loadRegistry();
-  tombstones!.set(roomId, Date.now());
+  const now = Date.now();
+  for (const roomId of roomIds) tombstones!.set(roomId, now);
   await uploadJSON(REGISTRY_KEY, RegistrySchema.parse({ tombstones: Object.fromEntries(tombstones!) }));
-  console.log(`🪦 Tombstoned room ${roomId}`);
+  console.log(`🪦 Tombstoned ${roomIds.length} room(s): ${roomIds.join(", ")}`);
 }
 
 /** Test hook: force the next access to reload from R2. */

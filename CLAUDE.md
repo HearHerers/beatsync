@@ -29,6 +29,7 @@ bun run room:info <id>   # Room detail: zones, playlists, clients (offline)
 bun run room:archive <id>    # Soft delete: evict + hide + reject joins; reversible
 bun run room:unarchive <id>  # Reverse an archive
 bun run room:delete <id> --yes  # HARD delete: purge state + R2 audio, tombstoned
+bun run rooms:purge --yes    # HARD delete EVERY room + all audio (incl. orphans)
 # The three mutations call the running server's /admin API (OPERATOR_SECRET bearer).
 bun run type-check       # tsc --noEmit
 
