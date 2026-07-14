@@ -87,6 +87,17 @@ export const handleSetShapeFalloff: HandlerFunction<ExtractWSRequestFrom["SET_SH
   broadcastShapes(room, server);
 };
 
+export const handleSetShapeName: HandlerFunction<ExtractWSRequestFrom["SET_SHAPE_NAME"]> = ({
+  ws,
+  message,
+  server,
+}) => {
+  const { room } = requireCanMutate(ws);
+  if (!room.isMapRoom()) return;
+  if (!room.setShapeName(message.shapeId, message.name)) return;
+  broadcastShapes(room, server);
+};
+
 export const handleSetShapeGroup: HandlerFunction<ExtractWSRequestFrom["SET_SHAPE_GROUP"]> = ({
   ws,
   message,
