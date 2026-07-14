@@ -108,15 +108,16 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
     try {
       const doc = await parseBeatgridFile(file);
       const allUrls = Array.from(new Set(Array.from(playlists.values()).flatMap((p) => p.tracks.map((t) => t.url))));
-      const { matches, unmatchedFiles, skippedDynamic } = matchBeatgridsToTracks(doc, allUrls);
+      const { matches, matchedByMetadata, unmatchedFiles, skippedDynamic } = matchBeatgridsToTracks(doc, allUrls);
       for (const m of matches) {
         send({ type: ClientActionEnum.enum.SET_TRACK_BEATGRID, url: m.url, beatgrid: m.beatgrid });
       }
       if (matches.length === 0) {
-        toast.error("No beatgrids matched tracks in this room (matching is by filename).");
+        toast.error("No beatgrids matched tracks in this room (matching is by filename or title/artist).");
       } else {
         toast.success(
           `Beatgrids: matched ${matches.length} of ${doc.tracks.length}` +
+            (matchedByMetadata > 0 ? ` (${matchedByMetadata} via title/artist)` : "") +
             (skippedDynamic.length > 0 ? ` (${skippedDynamic.length} dynamic skipped)` : "")
         );
       }
