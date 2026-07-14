@@ -20,7 +20,7 @@ export const ShapeSchema = z.object({
   createdBy: z.string(), // clientId of creator
   createdAt: z.number(), // epoch ms
 
-  // Optional curator-set display name. UI falls back to "Zone <first6chars>"
+  // Optional curator-set display name. UI falls back to "Zone <last6chars-of-id>"
   // when unset. Empty string clears the name.
   name: z.string().max(80).optional(),
 

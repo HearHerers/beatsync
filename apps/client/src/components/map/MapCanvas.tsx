@@ -9,6 +9,7 @@ import { useClientId } from "@/hooks/useClientId";
 import { getShapeCircle, getShapePolygonRing, outwardOffsetPolygonRing } from "@/lib/geo";
 import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
+import { zoneDisplayName } from "@/lib/zoneName";
 import { useRoomStore } from "@/store/room";
 import { sendWSRequest } from "@/utils/ws";
 import type { MapTileLayerId, ShapeType } from "@beatsync/shared";
@@ -487,7 +488,7 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
       // playlist details (track count, play state) are visible in the side
       // panel that hosts the Queue/Player UI. Names are user-entered and
       // Leaflet renders tooltip strings as HTML, so escape them.
-      const tooltipLabel = escapeHtml(shape.name ?? `Zone ${shape.id.slice(0, 6)}`);
+      const tooltipLabel = escapeHtml(zoneDisplayName(shape));
       layer.bindTooltip(`<div class="text-xs"><strong>${tooltipLabel}</strong></div>`, {
         permanent: false,
         direction: "top",

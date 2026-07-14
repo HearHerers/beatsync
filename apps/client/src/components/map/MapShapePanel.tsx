@@ -18,6 +18,7 @@ import { Queue } from "@/components/Queue";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { exportPlaylistToFile, parsePlaylistFile } from "@/lib/playlistFile";
+import { zoneDisplayName } from "@/lib/zoneName";
 import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { useRoomStore } from "@/store/room";
@@ -217,7 +218,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
 /**
  * Inline editable shape name. Mutators see a click-to-edit pencil; non-mutators
  * see the static label. Enter / blur commits, Esc cancels, empty commits clear
- * the name (which falls back to "Zone <id-prefix>").
+ * the name (which falls back to the zoneDisplayName id-based default).
  */
 function ShapeNameEditor({
   shape,
@@ -230,8 +231,8 @@ function ShapeNameEditor({
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const fallback = `Zone ${shape.id.slice(0, 6)}`;
-  const displayed = shape.name ?? fallback;
+  const fallback = zoneDisplayName({ id: shape.id });
+  const displayed = zoneDisplayName(shape);
 
   const startEdit = () => {
     if (!canMutate) return;
