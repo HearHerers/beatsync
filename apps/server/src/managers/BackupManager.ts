@@ -164,8 +164,9 @@ export class BackupManager {
 
       if (!latestBackupKey) {
         console.log("📭 No backups found");
-        // No automatic orphan deletion: room audio is permanent and only removed
-        // by an explicit `bun run cleanup:live`. See routes/cleanup.ts.
+        // No automatic orphan deletion: room audio is permanent. There is
+        // currently no deletion path; the operator API (OPERATOR_ROOM_MANAGEMENT.md)
+        // will add an explicit, tombstoned one.
         return false;
       }
 
@@ -240,8 +241,9 @@ export class BackupManager {
         });
       }
 
-      // No automatic orphan deletion after restore: room audio is permanent and
-      // only removed by an explicit `bun run cleanup:live`. See routes/cleanup.ts.
+      // No automatic orphan deletion after restore: room audio is permanent.
+      // There is currently no deletion path; the operator API
+      // (OPERATOR_ROOM_MANAGEMENT.md) will add an explicit, tombstoned one.
       return true;
     } catch (error) {
       console.error("❌ State restore failed:", error);
