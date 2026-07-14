@@ -53,6 +53,7 @@ export class BackupManager {
               trackIndex: 0,
               serverTimeToExecute: 0,
               trackPositionSeconds: 0,
+              playbackRate: 1,
             };
         return { id: p.id, tracks, loop: p.loop, playbackState };
       });

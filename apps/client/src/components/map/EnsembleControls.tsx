@@ -1,77 +1,73 @@
 "use client";
 // Bottom-bar transport for map rooms. Treats every shape's playlist as part of
-// one synchronized installation, with a single toggle:
+// one synchronized installation:
 //
-//   - If anything is playing → button shows "Pause all" and pauses every
-//     currently-playing context.
-//   - Otherwise → button shows "Play all" and starts every playlist that has
-//     at least one track (resuming the current track if one is set, else
-//     starting the first track).
+//   - If anything is playing → "Pause all" pauses every currently-playing
+//     context, capturing each zone's position at ONE shared instant.
+//   - Otherwise → "Play all" starts every playlist that has at least one track
+//     from position 0, locked to one shared serverTimeToExecute (phase-aligned).
+//   - When paused zones hold captured positions, a "Resume all" button restarts
+//     them from those positions at one shared instant — relative phase between
+//     zones (including beat-sync lock) survives the pause/resume cycle.
+//
+// Server-side batched coordination guarantees every zone receives the same
+// scheduled instant — so commensurate loops stay musically in phase.
 //
 // No skip/shuffle — those are per-context concerns and live in the per-shape
 // queue (clicking a track).
 
 import { Button } from "@/components/ui/button";
 import { useCanMutate, useGlobalStore } from "@/store/global";
-import { sendWSRequest } from "@/utils/ws";
-import { ClientActionEnum, MAIN_CONTEXT_ID } from "@beatsync/shared";
-import { Pause, Play } from "lucide-react";
+import { MAIN_CONTEXT_ID } from "@beatsync/shared";
+import { Pause, Play, StepForward } from "lucide-react";
 import { useMemo } from "react";
 
 export const EnsembleControls = () => {
   const canMutate = useCanMutate();
   const playlists = useGlobalStore((s) => s.playlists);
   const isConnected = useGlobalStore((s) => s.socket?.readyState === WebSocket.OPEN);
+  const broadcastPlayAll = useGlobalStore((s) => s.broadcastPlayAll);
+  const broadcastPauseAll = useGlobalStore((s) => s.broadcastPauseAll);
 
-  // Derive counts across every non-main context. Main is the back-compat audio-
-  // room playlist and is empty in map rooms anyway.
-  const { playingCount, totalWithTracks } = useMemo(() => {
+  // Derive counts + the contextId list for each operation. Main is the back-
+  // compat audio-room playlist and is empty in map rooms anyway.
+  const { playingCount, totalWithTracks, playContextIds, pauseContextIds, resumableCount } = useMemo(() => {
     let playing = 0;
     let withTracks = 0;
+    let resumable = 0;
+    const playableIds: string[] = [];
+    const pausableIds: string[] = [];
     for (const p of playlists.values()) {
       if (p.id === MAIN_CONTEXT_ID) continue;
-      if (p.tracks.length > 0) withTracks++;
-      if (p.playbackState.type === "playing") playing++;
+      if (p.tracks.length > 0) {
+        withTracks++;
+        playableIds.push(p.id);
+      }
+      if (p.playbackState.type === "playing") {
+        playing++;
+        pausableIds.push(p.id);
+      } else if (p.playbackState.audioSource && p.playbackState.trackPositionSeconds > 0) {
+        // Paused mid-track (position captured by Pause All) — resumable.
+        resumable++;
+      }
     }
-    return { playingCount: playing, totalWithTracks: withTracks };
+    return {
+      playingCount: playing,
+      totalWithTracks: withTracks,
+      playContextIds: playableIds,
+      pauseContextIds: pausableIds,
+      resumableCount: resumable,
+    };
   }, [playlists]);
 
   const anyPlaying = playingCount > 0;
   const disabled = !isConnected || totalWithTracks === 0;
 
   const toggle = () => {
-    const socket = useGlobalStore.getState().socket;
-    if (!socket) return;
     if (anyPlaying) {
-      for (const p of playlists.values()) {
-        if (p.id === MAIN_CONTEXT_ID) continue;
-        if (p.playbackState.type !== "playing") continue;
-        sendWSRequest({
-          ws: socket,
-          request: {
-            type: ClientActionEnum.enum.PAUSE,
-            contextId: p.id,
-            audioSource: p.playbackState.audioSource,
-            trackTimeSeconds: 0,
-          },
-        });
-      }
+      broadcastPauseAll(pauseContextIds);
     } else {
-      for (const p of playlists.values()) {
-        if (p.id === MAIN_CONTEXT_ID) continue;
-        if (p.tracks.length === 0) continue;
-        const audioSource = p.playbackState.audioSource || p.tracks[0].url;
-        const trackTimeSeconds = p.playbackState.audioSource ? p.playbackState.trackPositionSeconds : 0;
-        sendWSRequest({
-          ws: socket,
-          request: {
-            type: ClientActionEnum.enum.PLAY,
-            contextId: p.id,
-            audioSource,
-            trackTimeSeconds,
-          },
-        });
-      }
+      broadcastPlayAll(playContextIds);
     }
   };
 
@@ -84,13 +80,28 @@ export const EnsembleControls = () => {
           ? "Draw a zone and add audio to start"
           : `${playingCount} of ${totalWithTracks} zone${totalWithTracks === 1 ? "" : "s"} playing`}
       </div>
+      {canMutate && !anyPlaying && resumableCount > 0 && (
+        <Button
+          size="sm"
+          variant="default"
+          onClick={() => broadcastPlayAll(playContextIds, { resume: true })}
+          disabled={disabled}
+          className="h-8 px-3 text-xs"
+          title={`Resume ${resumableCount} paused zone${resumableCount === 1 ? "" : "s"} from where they stopped (relative phase preserved)`}
+        >
+          <StepForward className="mr-1 size-3.5" /> Resume all
+        </Button>
+      )}
       {canMutate && (
         <Button
           size="sm"
-          variant={anyPlaying ? "secondary" : "default"}
+          variant={anyPlaying ? "secondary" : resumableCount > 0 ? "secondary" : "default"}
           onClick={toggle}
           disabled={disabled}
           className="h-8 px-3 text-xs"
+          title={
+            anyPlaying ? "Pause every playing zone (positions are kept for Resume)" : "Start every zone from the top"
+          }
         >
           {anyPlaying ? (
             <>

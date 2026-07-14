@@ -27,6 +27,9 @@ import {
   handleReorderTrackInContext,
 } from "@/websocket/handlers/contextTracks";
 import { handleSetUsername } from "@/websocket/handlers/setUsername";
+import { handlePauseAllContexts } from "@/websocket/handlers/pauseAllContexts";
+import { handlePlayAllContexts } from "@/websocket/handlers/playAllContexts";
+import { handleSetTrackBeatgrid, handleSyncZones } from "@/websocket/handlers/zoneSync";
 import { handleSync } from "@/websocket/handlers/sync";
 import {
   handleAddShape,
@@ -147,6 +150,14 @@ export const WS_REGISTRY: WebsocketRegistry = {
     handle: handleSetContextLoop,
     description: "Toggle the loop flag for a playlist context",
   },
+  [ClientActionEnum.enum.SET_TRACK_BEATGRID]: {
+    handle: handleSetTrackBeatgrid,
+    description: "Attach imported beatgrid data to a track (by URL)",
+  },
+  [ClientActionEnum.enum.SYNC_ZONES]: {
+    handle: handleSyncZones,
+    description: "Beat-match a follower zone to a master zone",
+  },
   [ClientActionEnum.enum.ADD_TRACK_TO_CONTEXT]: {
     handle: handleAddTrackToContext,
     description: "Append a track to a specific playlist context",
@@ -162,6 +173,14 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.IMPORT_TRACKS_TO_CONTEXT]: {
     handle: handleImportTracksToContext,
     description: "Bulk-add tracks from an imported playlist file to a context",
+  },
+  [ClientActionEnum.enum.PLAY_ALL_CONTEXTS]: {
+    handle: handlePlayAllContexts,
+    description: "Start every eligible playlist context with one shared serverTimeToExecute",
+  },
+  [ClientActionEnum.enum.PAUSE_ALL_CONTEXTS]: {
+    handle: handlePauseAllContexts,
+    description: "Pause every currently-playing playlist context with one shared serverTimeToExecute",
   },
 
   // ── Map-room handlers ─────────────────────────────────────────────

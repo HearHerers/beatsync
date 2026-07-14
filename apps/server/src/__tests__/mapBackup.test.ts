@@ -33,6 +33,7 @@ describe("BackupManager: map round-trip", () => {
                   trackIndex: 0,
                   serverTimeToExecute: 0,
                   trackPositionSeconds: 0,
+                  playbackRate: 1,
                 },
               },
               {
@@ -45,6 +46,7 @@ describe("BackupManager: map round-trip", () => {
                   trackIndex: 0,
                   serverTimeToExecute: 0,
                   trackPositionSeconds: 0,
+                  playbackRate: 1,
                 },
               },
             ],
@@ -112,6 +114,7 @@ describe("BackupManager: map round-trip", () => {
                   trackIndex: 0,
                   serverTimeToExecute: 0,
                   trackPositionSeconds: 0,
+                  playbackRate: 1,
                 },
               },
             ],
