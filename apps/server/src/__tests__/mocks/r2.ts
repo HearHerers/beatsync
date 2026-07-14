@@ -23,6 +23,9 @@ export function mockR2(overrides: Record<string, ReturnType<typeof mock>> = {}):
       /* noop */
     }),
     validateAudioFileExists: mock(() => true),
+    // Env-dependent: the real one reads S3_* vars, absent on CI. Tests must
+    // behave as if R2 is configured regardless of host env.
+    validateR2Config: mock(() => ({ isValid: true, errors: [] })),
     cleanupOrphanedRooms: mock(() => ({
       orphanedRooms: [],
       totalRooms: 0,
