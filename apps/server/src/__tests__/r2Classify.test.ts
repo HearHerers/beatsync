@@ -59,4 +59,14 @@ describe("keyFromPublicUrl / roomIdFromUrl / isOwnBucketUrl", () => {
     expect(r2.isOwnBucketUrl(url)).toBe(true);
     expect(r2.roomIdFromUrl(url)).toBeNull();
   });
+
+  // Restore-time track validation must not drop external (music-provider)
+  // tracks: they aren't R2 objects, so there is nothing to HEAD. This
+  // short-circuits before any network call. (Regression: restore dropped every
+  // Navidrome track — and, via bucket-in-key derivation, every uploaded track
+  // on path-style deployments — on server restart.)
+  it("validateAudioFileExists keeps non-bucket URLs without hitting R2", async () => {
+    const r2 = await loadR2("https://s3.pc.hearhere.now/beatsync-audio");
+    expect(await r2.validateAudioFileExists("https://navidrome.example/rest/stream?id=123")).toBe(true);
+  });
 });
