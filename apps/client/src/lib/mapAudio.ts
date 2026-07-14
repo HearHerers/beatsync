@@ -29,7 +29,7 @@ interface ShapeChain {
   // A play() that arrived before the buffer was ready (typical for late joiners who
   // get a unicast SCHEDULED_ACTION/PLAY in the initial burst without a prior LOAD).
   // Re-invoked from loadAudioForShape() once decode completes.
-  pendingPlay?: { audioSource: string; trackTimeSeconds: number; targetServerTime: number };
+  pendingPlay?: { audioSource: string; trackTimeSeconds: number; targetServerTime: number; playbackRate: number };
   // Diagnostics: what we last scheduled, so getDebugInfo can compare actual vs
   // intended playback position across tabs.
   lastSchedule?: {
@@ -37,6 +37,7 @@ interface ShapeChain {
     startedAtOffset: number; // the second arg to source.start (track position at start)
     targetServerTime: number; // server time the play was scheduled for
     requestedTrackTime: number; // trackTimeSeconds the server requested
+    playbackRate: number; // tempo-sync rate; buffer advances at rate × wall-clock
     path: "on-time" | "late"; // which branch playShape took
     // NTP / latency snapshot at the time of scheduling — useful for diagnosing why
     // a tab landed at the wrong wall time. If offsetEstimateMs / outputLatencyMs
@@ -102,9 +103,9 @@ async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
     // that the buffer is ready. Only honor it if the URL still matches the pending
     // play's source — otherwise a newer play has superseded it.
     if (chain.pendingPlay && chain.pendingPlay.audioSource === url) {
-      const { audioSource, trackTimeSeconds, targetServerTime } = chain.pendingPlay;
+      const { audioSource, trackTimeSeconds, targetServerTime, playbackRate } = chain.pendingPlay;
       chain.pendingPlay = undefined;
-      playShape(shapeId, audioSource, trackTimeSeconds, targetServerTime);
+      playShape(shapeId, audioSource, trackTimeSeconds, targetServerTime, playbackRate);
     }
   } catch (err) {
     console.error(`[mapAudio] decode failed for shape ${shapeId}`, err);
@@ -128,19 +129,41 @@ function notifyLoaded(shapeId: string, url: string): void {
   });
 }
 
+/** Stop + disconnect a source immediately, tolerating already-stopped nodes. */
+function stopSource(source: AudioBufferSourceNode | undefined): void {
+  if (!source) return;
+  source.onended = null;
+  try {
+    source.stop();
+  } catch {
+    /* already stopped */
+  }
+  source.disconnect();
+}
+
 /**
  * Schedule playback of a shape at the given server-time. Uses globalStore's
  * computeScheduleTiming so the math (NTP offset + nudge + output-latency
  * compensation + clamping) is identical to audio-room scheduling.
+ *
+ * playbackRate ≠ 1 = zone beat-matching (SYNC_ZONES): the buffer position
+ * advances at rate × wall-clock, so every conversion between elapsed wall time
+ * and buffer offset below must scale by the rate.
  */
-function playShape(shapeId: string, audioSource: string, trackTimeSeconds: number, targetServerTime: number): void {
+function playShape(
+  shapeId: string,
+  audioSource: string,
+  trackTimeSeconds: number,
+  targetServerTime: number,
+  playbackRate: number = 1
+): void {
   const chain = getOrCreateChain(shapeId);
 
   // Buffer not ready (typical for late-join unicast resumes where there's no load
   // gate). Stash the play parameters; loadAudioForShape will replay once decode
   // completes.
   if (!chain.buffer || chain.url !== audioSource) {
-    chain.pendingPlay = { audioSource, trackTimeSeconds, targetServerTime };
+    chain.pendingPlay = { audioSource, trackTimeSeconds, targetServerTime, playbackRate };
     void loadAudioForShape(shapeId, audioSource);
     return;
   }
@@ -148,7 +171,7 @@ function playShape(shapeId: string, audioSource: string, trackTimeSeconds: numbe
   // NTP not synced yet (typical for a freshly-opened tab). Scheduling now would use
   // a stale offsetEstimate and land at the wrong wall time. Poll for sync, then re-fire.
   if (!useGlobalStore.getState().isSynced) {
-    chain.pendingPlay = { audioSource, trackTimeSeconds, targetServerTime };
+    chain.pendingPlay = { audioSource, trackTimeSeconds, targetServerTime, playbackRate };
     waitForNtpSyncThenReplay(shapeId);
     return;
   }
@@ -165,28 +188,24 @@ function playShape(shapeId: string, audioSource: string, trackTimeSeconds: numbe
   // MapRoom calls resume() on the first user gesture; once it fires, the statechange
   // listener below re-invokes playShape with the original args.
   if (audioContextManager.getContext().state !== "running") {
-    chain.pendingPlay = { audioSource, trackTimeSeconds, targetServerTime };
+    chain.pendingPlay = { audioSource, trackTimeSeconds, targetServerTime, playbackRate };
     waitForAudioContextRunningThenReplay(shapeId);
     return;
   }
 
   chain.pendingPlay = undefined;
 
-  // Stop any previous source.
-  if (chain.sourceNode) {
-    try {
-      chain.sourceNode.stop();
-    } catch {
-      /* already stopped */
-    }
-    chain.sourceNode.disconnect();
-    chain.sourceNode = undefined;
-  }
+  // Previous source (reschedules: track change, seek, SYNC_ZONES). Don't stop it
+  // yet — it keeps playing until the new schedule's start moment so reschedules
+  // are gapless; we stop it at exactly startAt below.
+  const oldSource = chain.sourceNode;
+  chain.sourceNode = undefined;
 
   const ctx = audioContextManager.getContext();
   const source = audioContextManager.createBufferSource();
   source.buffer = chain.buffer;
   source.loop = true; // shape.loop is enforced server-side; default true matches map UX
+  source.playbackRate.value = playbackRate;
   source.connect(chain.proximityGain);
 
   // Beatsync's exact scheduling logic, adapted for per-shape playback. Two cases:
@@ -221,10 +240,13 @@ function playShape(shapeId: string, audioSource: string, trackTimeSeconds: numbe
     // For the audible position to match the server's intended timeline, the buffer
     // offset must be advanced by the same delta — INCLUDING outputLatency. The
     // on-time path's compensation hides this; the late path has to add it explicitly.
+    // The wall-clock delta converts to buffer seconds through playbackRate: a
+    // tempo-synced zone's buffer advances at rate × wall-clock.
     const effectiveOffsetMs = state.offsetEstimate + state.nudgeOffsetMs;
     const elapsedSinceTargetMs = epochNow() + effectiveOffsetMs - targetServerTime;
     startAt = ctx.currentTime + LATE_RETRY_DELAY_MS / 1000;
-    offsetRaw = trackTimeSeconds + (elapsedSinceTargetMs + LATE_RETRY_DELAY_MS + outputLatencyMs) / 1000;
+    offsetRaw =
+      trackTimeSeconds + (playbackRate * (elapsedSinceTargetMs + LATE_RETRY_DELAY_MS + outputLatencyMs)) / 1000;
     path = "late";
   }
 
@@ -235,7 +257,18 @@ function playShape(shapeId: string, audioSource: string, trackTimeSeconds: numbe
     source.start(startAt, offset);
   } catch (err) {
     console.error(`[mapAudio] failed to start shape ${shapeId}`, err);
+    stopSource(oldSource); // new source failed — don't leave the old one orphaned
     return;
+  }
+  // Hand over at the exact moment the new source begins (sample-accurate,
+  // audio-thread timed) so reschedules/syncs are gapless.
+  if (oldSource) {
+    oldSource.onended = () => oldSource.disconnect();
+    try {
+      oldSource.stop(startAt);
+    } catch {
+      stopSource(oldSource); // already stopped
+    }
   }
   chain.sourceNode = source;
   chain.lastSchedule = {
@@ -243,6 +276,7 @@ function playShape(shapeId: string, audioSource: string, trackTimeSeconds: numbe
     startedAtOffset: offset,
     targetServerTime,
     requestedTrackTime: trackTimeSeconds,
+    playbackRate,
     path,
     offsetEstimateMs: state.offsetEstimate,
     outputLatencyMs,
@@ -253,12 +287,7 @@ function playShape(shapeId: string, audioSource: string, trackTimeSeconds: numbe
 function pauseShape(shapeId: string): void {
   const chain = chains.get(shapeId);
   if (!chain?.sourceNode) return;
-  try {
-    chain.sourceNode.stop();
-  } catch {
-    /* already stopped */
-  }
-  chain.sourceNode.disconnect();
+  stopSource(chain.sourceNode);
   chain.sourceNode = undefined;
 }
 
@@ -350,6 +379,11 @@ export interface ShapePlaybackDebug {
   intendedPosition?: number;
   /** Difference: positive = we're ahead of server, negative = behind. In seconds. */
   driftSeconds?: number;
+  /** Tempo-sync rate of the current schedule (1 = normal). */
+  playbackRate?: number;
+  /** Fraction of the current beat elapsed [0,1), from the track's beatgrid if known.
+   *  Two beat-matched zones should show matching values (mod 1). */
+  beatPhase?: number;
   lastSchedule?: ShapeChain["lastSchedule"];
 }
 
@@ -372,19 +406,30 @@ function getDebugInfo(): ShapePlaybackDebug[] {
       lastSchedule: chain.lastSchedule,
     };
     if (chain.sourceNode && chain.lastSchedule && chain.buffer) {
+      // Buffer position advances at playbackRate × wall-clock (tempo-synced zones).
+      const rate = chain.lastSchedule.playbackRate;
+      info.playbackRate = rate;
       const elapsedSinceStart = ctx.currentTime - chain.lastSchedule.startedAtCtxTime;
-      const rawPos = chain.lastSchedule.startedAtOffset + Math.max(0, elapsedSinceStart);
+      const rawPos = chain.lastSchedule.startedAtOffset + rate * Math.max(0, elapsedSinceStart);
       info.currentPosition = ((rawPos % chain.buffer.duration) + chain.buffer.duration) % chain.buffer.duration;
 
       // What the server would say the position should be at the current moment.
       const elapsedSinceTargetMs = serverNowMs - chain.lastSchedule.targetServerTime;
-      const intendedRaw = chain.lastSchedule.requestedTrackTime + Math.max(0, elapsedSinceTargetMs) / 1000;
+      const intendedRaw = chain.lastSchedule.requestedTrackTime + (rate * Math.max(0, elapsedSinceTargetMs)) / 1000;
       info.intendedPosition = ((intendedRaw % chain.buffer.duration) + chain.buffer.duration) % chain.buffer.duration;
 
       // Drift = current - intended. Wrap into [-duration/2, duration/2] for sane sign.
       const d = info.currentPosition - info.intendedPosition;
       const half = chain.buffer.duration / 2;
       info.driftSeconds = d > half ? d - chain.buffer.duration : d < -half ? d + chain.buffer.duration : d;
+
+      // Beat phase from the track's beatgrid (when imported): fraction of the
+      // current beat elapsed. Beat-matched zones should agree on this number.
+      const track = state.playlists.get(shapeId)?.tracks.find((t) => t.url === chain.url);
+      if (track?.beatgrid && info.currentPosition !== undefined) {
+        const beatsIn = ((info.currentPosition - track.beatgrid.firstDownbeatSec) * track.beatgrid.bpm) / 60;
+        info.beatPhase = ((beatsIn % 1) + 1) % 1;
+      }
     }
     out.push(info);
   }

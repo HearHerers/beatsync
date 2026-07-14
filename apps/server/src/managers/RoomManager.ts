@@ -1,6 +1,7 @@
 import { calculateScheduleTimeMs, DEFAULT_CLIENT_RTT_MS } from "@/config";
 import { IS_DEMO_MODE } from "@/demo";
 import { deleteObjectsWithPrefix } from "@/lib/r2";
+import { computeZoneSync } from "@/lib/zoneSync";
 import { ChatManager } from "@/managers/ChatManager";
 import { calculateGainFromDistanceToSource } from "@/spatial";
 import { debounce } from "@/utils/debounce";
@@ -9,6 +10,7 @@ import { positionClientsInCircle } from "@/utils/spatial";
 import type { BunServer, WSData } from "@/utils/websocket";
 import type {
   AudioSourceType,
+  BeatgridType,
   ChatMessageType,
   ClientDataType,
   DiscoveryRoomType,
@@ -121,6 +123,7 @@ const INITIAL_PLAYLIST_PLAYBACK: PlaylistPlaybackState = {
   trackIndex: 0,
   serverTimeToExecute: 0,
   trackPositionSeconds: 0,
+  playbackRate: 1,
 };
 
 interface PendingPlayState {
@@ -180,6 +183,7 @@ export class RoomManager {
       audioSource: p.audioSource,
       serverTimeToExecute: p.serverTimeToExecute,
       trackPositionSeconds: p.trackPositionSeconds,
+      playbackRate: p.playbackRate,
     };
   }
   private set playbackState(value: RoomPlaybackState) {
@@ -190,6 +194,7 @@ export class RoomManager {
       audioSource: value.audioSource,
       serverTimeToExecute: value.serverTimeToExecute,
       trackPositionSeconds: value.trackPositionSeconds,
+      playbackRate: value.playbackRate,
     };
   }
 
@@ -1295,6 +1300,7 @@ export class RoomManager {
           trackIndex: playlist.playback.trackIndex,
           trackPositionSeconds: 0,
           serverTimeToExecute,
+          playbackRate: 1,
         };
         return false;
       }
@@ -1309,6 +1315,8 @@ export class RoomManager {
       trackIndex: trackIndex === -1 ? playlist.playback.trackIndex : trackIndex,
       trackPositionSeconds: pauseSchema.trackTimeSeconds,
       serverTimeToExecute,
+      // Preserve the tempo-sync rate across pause so resume plays at the same speed.
+      playbackRate: playlist.playback.playbackRate,
     };
     return true;
   }
@@ -1336,6 +1344,9 @@ export class RoomManager {
       trackIndex,
       trackPositionSeconds: playSchema.trackTimeSeconds,
       serverTimeToExecute,
+      // Normal plays (no playbackRate in the action) reset tempo-sync to 1;
+      // SYNC_ZONES sets it explicitly.
+      playbackRate: playSchema.playbackRate ?? 1,
     };
     return true;
   }
@@ -1362,6 +1373,7 @@ export class RoomManager {
   private sendResumePlayForContext(ws: ServerWebSocket<WSData>, playlist: PlaylistRuntime): void {
     const serverTimeWhenStarted = playlist.playback.serverTimeToExecute;
     const trackPositionWhenStarted = playlist.playback.trackPositionSeconds;
+    const playbackRate = playlist.playback.playbackRate;
     const now = epochNow();
 
     // Use dynamic scheduling based on max client RTT
@@ -1371,12 +1383,14 @@ export class RoomManager {
 
     const timeElapsedSinceStart = now - serverTimeWhenStarted;
     const timeElapsedAtExecution = serverTimeToExecute - serverTimeWhenStarted;
-    const resumeTrackTimeSeconds = trackPositionWhenStarted + timeElapsedAtExecution / 1000;
+    // Buffer position advances at playbackRate × wall-clock (tempo-synced zones).
+    const resumeTrackTimeSeconds = trackPositionWhenStarted + (playbackRate * timeElapsedAtExecution) / 1000;
 
     console.log(
       `Resuming ctx=${playlist.id} on client ${ws.data.clientId}: track started at ` +
         `${trackPositionWhenStarted.toFixed(2)}s, ${(timeElapsedSinceStart / 1000).toFixed(2)}s elapsed, ` +
-        `will be at ${resumeTrackTimeSeconds.toFixed(2)}s when client starts`
+        `will be at ${resumeTrackTimeSeconds.toFixed(2)}s when client starts` +
+        (playbackRate !== 1 ? ` (rate ${playbackRate.toFixed(4)})` : "")
     );
 
     sendUnicast({
@@ -1388,6 +1402,7 @@ export class RoomManager {
           audioSource: playlist.playback.audioSource,
           trackTimeSeconds: resumeTrackTimeSeconds,
           ...(playlist.id !== MAIN_CONTEXT_ID && { contextId: playlist.id }),
+          ...(playbackRate !== 1 && { playbackRate }),
         },
         serverTimeToExecute,
       },
@@ -1720,6 +1735,79 @@ export class RoomManager {
     if (!playlist) return false;
     playlist.loop = loop;
     return true;
+  }
+
+  /**
+   * Attach a beatgrid to every occurrence of a track URL across all contexts —
+   * the grid is a property of the audio file, not of any one zone. Returns how
+   * many track entries were updated (0 = URL not in this room).
+   */
+  setTrackBeatgrid(url: string, beatgrid: BeatgridType): number {
+    let updated = 0;
+    for (const playlist of this.playlists.values()) {
+      playlist.tracks = playlist.tracks.map((t) => {
+        if (t.url !== url) return t;
+        updated++;
+        return { ...t, beatgrid };
+      });
+    }
+    return updated;
+  }
+
+  /**
+   * Beat-match the follower zone to the master zone (one-shot, CDJ-style).
+   * Validates preconditions, computes the anchor + rate via computeZoneSync,
+   * and updates the follower's authoritative playback state. Returns the PLAY
+   * scheduling parameters for the handler to broadcast, or an Error naming the
+   * unmet precondition (both zones playing, both current tracks gridded).
+   * The master is never touched.
+   */
+  syncZones(
+    masterContextId: string,
+    followerContextId: string
+  ): { anchorServerTime: number; followerRate: number; followerTrackTimeSeconds: number; audioSource: string } | Error {
+    if (masterContextId === followerContextId) return new Error("master and follower must differ");
+    const master = this.playlists.get(masterContextId);
+    const follower = this.playlists.get(followerContextId);
+    if (!master || !follower) return new Error("unknown context");
+    if (master.playback.type !== "playing" || follower.playback.type !== "playing")
+      return new Error("both zones must be playing");
+
+    const masterTrack = master.tracks.find((t) => t.url === master.playback.audioSource);
+    const followerTrack = follower.tracks.find((t) => t.url === follower.playback.audioSource);
+    if (!masterTrack?.beatgrid) return new Error("master track has no beatgrid");
+    if (!followerTrack?.beatgrid) return new Error("follower track has no beatgrid");
+
+    const result = computeZoneSync(
+      {
+        positionSeconds: master.playback.trackPositionSeconds,
+        atServerTime: master.playback.serverTimeToExecute,
+        playbackRate: master.playback.playbackRate,
+        beatgrid: masterTrack.beatgrid,
+      },
+      {
+        positionSeconds: follower.playback.trackPositionSeconds,
+        atServerTime: follower.playback.serverTimeToExecute,
+        playbackRate: follower.playback.playbackRate,
+        beatgrid: followerTrack.beatgrid,
+      },
+      this.getScheduledExecutionTime()
+    );
+
+    follower.playback = {
+      ...follower.playback,
+      trackPositionSeconds: result.followerTrackTimeSeconds,
+      serverTimeToExecute: result.anchorServerTime,
+      playbackRate: result.followerRate,
+    };
+
+    console.log(
+      `SYNC_ZONES in ${this.roomId}: ${followerContextId} → ${masterContextId} | ` +
+        `rate=${result.followerRate.toFixed(4)} anchor=+${(result.anchorServerTime - epochNow()).toFixed(0)}ms ` +
+        `followerPos=${result.followerTrackTimeSeconds.toFixed(3)}s masterPos=${result.masterTrackTimeSeconds.toFixed(3)}s`
+    );
+
+    return { ...result, audioSource: follower.playback.audioSource };
   }
 
   /**

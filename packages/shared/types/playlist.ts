@@ -19,6 +19,13 @@ export const PlaylistPlaybackStateSchema = z.object({
   serverTimeToExecute: z.number(),
   /** Position in the current track at the time of the action. */
   trackPositionSeconds: z.number(),
+  /**
+   * Tempo-sync rate (zone beat-matching). 1 = normal. When ≠ 1 the track's
+   * buffer position advances at `rate` × wall-clock, so EVERY position
+   * computation of the form "position + elapsed" must scale elapsed by this.
+   * Lives in authoritative state so resumes/late joins reconstruct it.
+   */
+  playbackRate: z.number().positive().default(1),
 });
 export type PlaylistPlaybackStateType = z.infer<typeof PlaylistPlaybackStateSchema>;
 
@@ -28,6 +35,7 @@ export const INITIAL_PLAYLIST_PLAYBACK_STATE: PlaylistPlaybackStateType = {
   trackIndex: 0,
   serverTimeToExecute: 0,
   trackPositionSeconds: 0,
+  playbackRate: 1,
 };
 
 /**

@@ -38,7 +38,13 @@ export const Queue = ({ className, contextId = MAIN_CONTEXT_ID, ...rest }: Queue
     if (isMain) return audioSources;
     if (!playlist) return [];
     const byUrl = new Map(audioSources.map((as) => [as.source.url, as]));
-    return playlist.tracks.map((t) => byUrl.get(t.url) ?? { source: t, status: "idle" });
+    // Loading state comes from the global registry, but the source object comes
+    // from the playlist — it carries per-track metadata (e.g. beatgrid) that the
+    // registry's copy may lack.
+    return playlist.tracks.map((t) => {
+      const registered = byUrl.get(t.url);
+      return registered ? { ...registered, source: t } : { source: t, status: "idle" as const };
+    });
   }, [isMain, audioSources, playlist]);
 
   // Reordering works in any context (audio-room "main" and map-room shapes

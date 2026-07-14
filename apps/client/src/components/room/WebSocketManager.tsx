@@ -235,11 +235,15 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
 
         if (scheduledAction.type === "PLAY") {
           if (scheduledAction.contextId) {
+            // playbackRate rides on SYNC_ZONES reschedules and rate-preserving
+            // resumes; absent means normal speed (and resets any prior sync rate).
+            const playbackRate = scheduledAction.playbackRate ?? 1;
             mapAudio.playShape(
               scheduledAction.contextId,
               scheduledAction.audioSource,
               scheduledAction.trackTimeSeconds,
-              serverTimeToExecute
+              serverTimeToExecute,
+              playbackRate
             );
             // Mirror the playing state into the client's playlists map so the
             // UI (Queue selection, EnsembleControls counter) updates.
@@ -248,6 +252,7 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
               audioSource: scheduledAction.audioSource,
               serverTimeToExecute,
               trackPositionSeconds: scheduledAction.trackTimeSeconds,
+              playbackRate,
             });
           } else {
             schedulePlay({

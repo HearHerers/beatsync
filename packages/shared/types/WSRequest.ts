@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CHAT_CONSTANTS, LOW_PASS_CONSTANTS, MAP_CONSTANTS } from "../constants";
-import { AudioSourceSchema, MapMetadataSchema, MapTileLayerIdEnum, PositionSchema } from "./basic";
+import { AudioSourceSchema, BeatgridSchema, MapMetadataSchema, MapTileLayerIdEnum, PositionSchema } from "./basic";
 import { PLAYLIST_EXPORT_MAX_TRACKS } from "./playlist";
 import { ShapeSchema } from "./shape";
 
@@ -37,6 +37,8 @@ export const ClientActionEnum = z.enum([
   "SET_METRONOME", // Toggle metronome on/off for all clients
   "SET_LOW_PASS_FREQ", // Set low-pass filter cutoff frequency
   "SET_CONTEXT_LOOP", // Set the loop flag for a playlist context
+  "SET_TRACK_BEATGRID", // Attach imported beatgrid data to a track (by URL)
+  "SYNC_ZONES", // Beat-match a follower zone to a master zone (map rooms)
   "ADD_TRACK_TO_CONTEXT", // Append a track to a specific playlist context
   "REMOVE_TRACK_FROM_CONTEXT", // Remove a track from a specific playlist context
   "REORDER_TRACK_IN_CONTEXT", // Reorder the tracks within a specific playlist context
@@ -79,6 +81,12 @@ export const PlayActionSchema = z.object({
    * audio-room behavior. Future room types (e.g. map rooms) use per-shape contexts.
    */
   contextId: z.string().optional(),
+  /**
+   * Tempo-sync rate for zone beat-matching. Omitted = 1 (normal speed). Only the
+   * server sets this (SYNC_ZONES computes it); it rides here because the
+   * SCHEDULED_ACTION broadcast reuses this schema as its payload.
+   */
+  playbackRate: z.number().positive().optional(),
 });
 
 export const PauseActionSchema = z.object({
@@ -197,6 +205,32 @@ export const SetContextLoopSchema = z.object({
   loop: z.boolean(),
   contextId: z.string().optional(),
 });
+
+/**
+ * Attach beatgrid data (imported from rekordbox-integration/ JSON) to a track.
+ * Applies to every playlist context containing the URL — the grid is a property
+ * of the audio file, not of any one zone.
+ */
+export const SetTrackBeatgridSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.SET_TRACK_BEATGRID),
+  url: z.string(),
+  beatgrid: BeatgridSchema,
+});
+export type SetTrackBeatgridType = z.infer<typeof SetTrackBeatgridSchema>;
+
+/**
+ * Beat-match the follower zone's playing track to the master zone's (map rooms).
+ * One-shot, CDJ-style: both zones must be playing tracks with beatgrids. The
+ * server computes the follower's playbackRate (= master BPM / follower BPM) and
+ * a bar-quantized phase anchor, then reschedules ONLY the follower — the master
+ * is never interrupted.
+ */
+export const SyncZonesSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.SYNC_ZONES),
+  masterContextId: z.string(),
+  followerContextId: z.string(),
+});
+export type SyncZonesType = z.infer<typeof SyncZonesSchema>;
 
 /**
  * Append a track to a specific context's playlist. For audio rooms this is
@@ -366,6 +400,8 @@ export const WSRequestSchema = z.discriminatedUnion("type", [
   SetMetronomeSchema,
   SetLowPassFreqSchema,
   SetContextLoopSchema,
+  SetTrackBeatgridSchema,
+  SyncZonesSchema,
   AddTrackToContextSchema,
   RemoveTrackFromContextSchema,
   ReorderTrackInContextSchema,

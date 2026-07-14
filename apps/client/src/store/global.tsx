@@ -192,6 +192,7 @@ interface GlobalState extends GlobalStateValues {
       audioSource: string;
       serverTimeToExecute?: number;
       trackPositionSeconds?: number;
+      playbackRate?: number;
     }
   ) => void;
 
@@ -1684,6 +1685,7 @@ export const useGlobalStore = create<GlobalState>((set, get) => {
             audioSource: patch.audioSource,
             serverTimeToExecute: patch.serverTimeToExecute ?? existing.playbackState.serverTimeToExecute,
             trackPositionSeconds: patch.trackPositionSeconds ?? existing.playbackState.trackPositionSeconds,
+            playbackRate: patch.playbackRate ?? existing.playbackState.playbackRate,
           },
         });
         return { playlists: next };

@@ -1,0 +1,30 @@
+{
+  "beatsyncBeatgrids": 1,
+  "exportedAt": 1783999511115,
+  "tracks": [
+    {
+      "file": "06 - Bump Talkin.flac",
+      "title": "Bump Talkin",
+      "artist": "Paul Johnson",
+      "bpm": 132.4,
+      "firstBeatSec": 0.004,
+      "firstDownbeatSec": 0.004,
+      "beatsPerBar": 4,
+      "grid": "constant",
+      "numBeats": 683,
+      "constGridMaxErrMs": 4.0
+    },
+    {
+      "file": "06 - Shinichi Atobe - Heat 3.flac",
+      "title": "Heat 3",
+      "artist": "Shinichi Atobe",
+      "bpm": 123.0,
+      "firstBeatSec": 0.052,
+      "firstDownbeatSec": 0.052,
+      "beatsPerBar": 4,
+      "grid": "constant",
+      "numBeats": 1184,
+      "constGridMaxErrMs": 3.3
+    }
+  ]
+}
