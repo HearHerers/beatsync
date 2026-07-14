@@ -1,17 +1,18 @@
 // Full detail for one persisted room, read offline from the latest R2 state
 // backup (does not need the server to be running).
 //
-//   bun run room:info <roomId> [--json] [--show-token]
+//   bun run room:info <roomId> [--json] [--show-token] [--sync]
 //
 // Shows room name, type, zones (shape name/type/falloff joined to the playlist
 // context whose id == shape.id) with their tracks, the room-wide "main"
 // playlist, cached clients, and chat size. The admin token is redacted unless
-// --show-token is passed. See OPERATOR_ROOM_MANAGEMENT.md (project root) —
-// this is Phase 0.
+// --show-token is passed. --sync asks the running server to write a fresh
+// backup first (needs OPERATOR_SECRET in .env). See OPERATOR_ROOM_MANAGEMENT.md
+// (project root) — this is Phase 0.
 
 import { MAIN_CONTEXT_ID, zoneDisplayName } from "@beatsync/shared";
 import type { RoomBackupType } from "@/managers/RoomManager";
-import { loadLatestBackup, trackTitleFromUrl } from "./lib/backupSnapshot";
+import { loadLatestBackup, requestSyncBackup, trackTitleFromUrl } from "./lib/backupSnapshot";
 
 type Playlist = RoomBackupType["playlists"][number];
 
@@ -34,8 +35,17 @@ async function main() {
   const flags = new Set(args.filter((a) => a.startsWith("--")));
   const roomId = args.find((a) => !a.startsWith("--"));
   if (!roomId) {
-    console.error("Usage: bun run room:info <roomId> [--json] [--show-token]");
+    console.error("Usage: bun run room:info <roomId> [--json] [--show-token] [--sync]");
     process.exit(1);
+  }
+
+  if (flags.has("--sync")) {
+    try {
+      await requestSyncBackup();
+    } catch (err) {
+      console.error(`⚠️ Sync failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.error("   Reading the latest existing snapshot instead.\n");
+    }
   }
 
   const { key, ageMinutes, backup } = await loadLatestBackup();
