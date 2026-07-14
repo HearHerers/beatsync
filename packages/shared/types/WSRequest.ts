@@ -52,6 +52,7 @@ export const ClientActionEnum = z.enum([
   "SET_SHAPE_NAME",
   "SET_SHAPE_GROUP",
   "SET_MAP_METADATA",
+  "SET_ROOM_NAME",
   "SET_USERNAME",
   "SET_DEFAULT_TILE_LAYER", // Admin sets the room-wide default base map
   "SET_GEO_POSITION", // Client GPS update
@@ -300,6 +301,12 @@ export const SetMapMetadataSchema = z.object({
 });
 export type SetMapMetadataType = z.infer<typeof SetMapMetadataSchema>;
 
+export const SetRoomNameSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.SET_ROOM_NAME),
+  /** Empty string clears the name (UI falls back to "Room <id>"). */
+  roomName: z.string().max(80),
+});
+export type SetRoomNameType = z.infer<typeof SetRoomNameSchema>;
 export const SetUsernameSchema = z.object({
   type: z.literal(ClientActionEnum.enum.SET_USERNAME),
   /** Display name for this client. Trimmed + length-capped server-side. */
@@ -362,6 +369,7 @@ export const WSRequestSchema = z.discriminatedUnion("type", [
   SetShapeNameSchema,
   SetShapeGroupSchema,
   SetMapMetadataSchema,
+  SetRoomNameSchema,
   SetUsernameSchema,
   SetDefaultTileLayerSchema,
   SetGeoPositionSchema,
