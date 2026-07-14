@@ -251,8 +251,8 @@ export class RoomManager {
 
   private demoAudioReadyClients = new Set<string>();
 
-  // Map-room state. roomType is fixed for the room's lifetime (set by the first
-  // connecting client via the WS upgrade ?roomType query param). When 'audio',
+  // Map-room state. roomType is fixed for the room's lifetime (set by the client
+  // that creates the room via the WS upgrade ?roomType query param). When 'audio',
   // shape methods refuse to mutate. When 'map', shapes is the authoritative
   // geometry registry — each shape has a corresponding playlist context with
   // id = shape.id (the playlist holds its tracks + playback state).
@@ -1965,9 +1965,9 @@ export class RoomManager {
   }
 
   /**
-   * Set the room's type. The first client to connect wins; subsequent attempts
-   * to change the type after clients have joined throw. Idempotent for same-
-   * value sets.
+   * Set the room's type. Only meant for brand-new rooms (the creating client
+   * wins — see handleOpen); attempts to change the type while clients are
+   * connected throw. Idempotent for same-value sets.
    */
   setRoomType(roomType: RoomTypeValue): void {
     if (this.roomType === roomType) return;
