@@ -52,7 +52,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
-import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
+import { useDefaultLayout, useGroupRef, usePanelRef, type GroupImperativeHandle } from "react-resizable-panels";
 import { EnsembleControls } from "./EnsembleControls";
 import { MapCanvas, useCanMutate } from "./MapCanvas";
 import { MapShapePanel } from "./MapShapePanel";
@@ -82,6 +82,64 @@ interface DesktopPanels {
   playlist: PanelControl;
   chat: PanelControl;
   settings: PanelControl;
+}
+
+// ── Chat/Settings collapse+expand helpers ─────────────────────────────
+// react-resizable-panels' imperative collapse()/expand() only trade space with
+// the panel's pivot neighbor. Chat and Settings are pivot partners, which made
+// them behave like an XOR: collapsing one handed its freed space to the other,
+// force-expanding it even from a collapsed rail — and with both collapsed,
+// expand() no-oped for Chat because its only neighbor (a collapsed rail) had
+// no space to give. These helpers repair the layout afterwards via the group's
+// setLayout so the space comes from / returns to the center panel instead.
+
+// Panel ids in the horizontal group → their DesktopPanels key.
+const SIDE_PANELS = { left: "users", right: "chat", settings: "settings" } as const;
+type SidePanelId = keyof typeof SIDE_PANELS;
+
+// Keep in sync with the ResizablePanel props in DesktopLayout.
+const CENTER_MIN_PCT = 30;
+const SIDE_MIN_PCT = 14;
+const SIDE_EXPAND_PCT = 20;
+
+function collapseSidePanel(group: GroupImperativeHandle | null, panels: DesktopPanels, id: SidePanelId) {
+  const target = panels[SIDE_PANELS[id]];
+  if (!group) {
+    target.ref.current?.collapse();
+    return;
+  }
+  const before = group.getLayout();
+  target.ref.current?.collapse();
+  const after = group.getLayout();
+  // If the freed space landed on a sibling that was collapsed, put that
+  // sibling back on its rail and give the space to center.
+  const fixed = { ...after };
+  let reclaimed = 0;
+  for (const [panelId, key] of Object.entries(SIDE_PANELS) as [SidePanelId, keyof DesktopPanels][]) {
+    if (panelId === id) continue;
+    const grew = (after[panelId] ?? 0) - (before[panelId] ?? 0);
+    if (panels[key].collapsed && grew > 0.1) {
+      reclaimed += grew;
+      fixed[panelId] = before[panelId] ?? 0;
+    }
+  }
+  if (reclaimed > 0.1) {
+    fixed.center = (fixed.center ?? 0) + reclaimed;
+    group.setLayout(fixed);
+  }
+}
+
+function expandSidePanel(group: GroupImperativeHandle | null, panels: DesktopPanels, id: SidePanelId) {
+  const ref = panels[SIDE_PANELS[id]].ref.current;
+  ref?.expand();
+  if (!group || !ref || !ref.isCollapsed()) return;
+  // expand() no-oped because the pivot neighbor is a collapsed rail; take the
+  // space from center instead.
+  const layout = group.getLayout();
+  const current = layout[id] ?? 0;
+  const grow = Math.min(SIDE_EXPAND_PCT - current, (layout.center ?? 0) - CENTER_MIN_PCT);
+  if (current + grow < SIDE_MIN_PCT) return;
+  group.setLayout({ ...layout, [id]: current + grow, center: (layout.center ?? 0) - grow });
 }
 
 export const MapRoom = ({ roomId }: MapRoomProps) => {
@@ -181,6 +239,9 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
     chat: usePanelControl(),
     settings: usePanelControl(),
   };
+  // Handle for the horizontal panel group — needed by the side-panel helpers
+  // to fix up layouts after collapse/expand (see collapseSidePanel above).
+  const horizontalGroupRef = useGroupRef();
 
   // Desktop panel toggles — rendered inside the TopBar's status row. Same
   // on/off affordance as the mobile toolbar, driving the same panel refs as
@@ -189,21 +250,38 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
   // built during render).
   const panelControls = (
     <div className="hidden lg:flex items-center gap-1">
-      {[
-        { label: "Users", icon: <Users className="size-3" />, panel: desktopPanels.users },
-        { label: "Map", icon: <MapIcon className="size-3" />, panel: desktopPanels.map },
-        { label: "Playlist", icon: <ListMusic className="size-3" />, panel: desktopPanels.playlist },
-        { label: "Chat", icon: <MessageCircle className="size-3" />, panel: desktopPanels.chat },
-        { label: "Settings", icon: <Settings className="size-3" />, panel: desktopPanels.settings },
-      ].map(({ label, icon, panel }) => (
+      {(
+        [
+          { label: "Users", icon: <Users className="size-3" />, panel: desktopPanels.users, sideId: "left" },
+          { label: "Map", icon: <MapIcon className="size-3" />, panel: desktopPanels.map },
+          { label: "Playlist", icon: <ListMusic className="size-3" />, panel: desktopPanels.playlist },
+          { label: "Chat", icon: <MessageCircle className="size-3" />, panel: desktopPanels.chat, sideId: "right" },
+          {
+            label: "Settings",
+            icon: <Settings className="size-3" />,
+            panel: desktopPanels.settings,
+            sideId: "settings",
+          },
+        ] as Array<{ label: string; icon: React.ReactNode; panel: PanelControl; sideId?: SidePanelId }>
+      ).map(({ label, icon, panel, sideId }) => (
         <Button
           key={label}
           size="sm"
           variant={panel.collapsed ? "outline" : "default"}
           className="h-6 px-2 text-[11px]"
-          onClick={() =>
-            panel.ref.current?.isCollapsed() ? panel.ref.current?.expand() : panel.ref.current?.collapse()
-          }
+          onClick={() => {
+            const isCollapsed = panel.ref.current?.isCollapsed() ?? false;
+            if (sideId) {
+              // Side panels route through the helpers so Chat and Settings
+              // don't trade space with each other's collapsed rails.
+              if (isCollapsed) expandSidePanel(horizontalGroupRef.current, desktopPanels, sideId);
+              else collapseSidePanel(horizontalGroupRef.current, desktopPanels, sideId);
+            } else if (isCollapsed) {
+              panel.ref.current?.expand();
+            } else {
+              panel.ref.current?.collapse();
+            }
+          }}
           title={`${panel.collapsed ? "Show" : "Hide"} ${label}`}
         >
           <span className="mr-1">{icon}</span>
@@ -242,7 +320,12 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
         >
           {/* Desktop / wide layout — resizable + collapsible. */}
           <div className="hidden lg:flex lg:flex-1 lg:overflow-hidden min-h-0">
-            <DesktopLayout canMutate={canMutate} overlays={overlays} panels={desktopPanels} />
+            <DesktopLayout
+              canMutate={canMutate}
+              overlays={overlays}
+              panels={desktopPanels}
+              groupRef={horizontalGroupRef}
+            />
           </div>
 
           {/* Mobile / narrow layout — toggleable panels, no resizing. */}
@@ -272,9 +355,10 @@ interface PaneProps {
 
 interface DesktopLayoutProps extends PaneProps {
   panels: DesktopPanels;
+  groupRef: ReturnType<typeof useGroupRef>;
 }
 
-const DesktopLayout = ({ canMutate, overlays, panels }: DesktopLayoutProps) => {
+const DesktopLayout = ({ canMutate, overlays, panels, groupRef }: DesktopLayoutProps) => {
   const { ref: leftRef, collapsed: leftCollapsed, setCollapsed: setLeftCollapsed } = panels.users;
   const { ref: mapRef, collapsed: mapCollapsed, setCollapsed: setMapCollapsed } = panels.map;
   const { ref: playlistRef, collapsed: playlistCollapsed, setCollapsed: setPlaylistCollapsed } = panels.playlist;
@@ -296,6 +380,7 @@ const DesktopLayout = ({ canMutate, overlays, panels }: DesktopLayoutProps) => {
   return (
     <ResizablePanelGroup
       orientation="horizontal"
+      groupRef={groupRef}
       defaultLayout={horizontal.defaultLayout}
       onLayoutChanged={horizontal.onLayoutChanged}
     >
@@ -408,14 +493,14 @@ const DesktopLayout = ({ canMutate, overlays, panels }: DesktopLayoutProps) => {
           <CollapsedRail
             label="Chat"
             icon={<MessageCircle className="size-3.5" />}
-            onClick={() => rightRef.current?.expand()}
+            onClick={() => expandSidePanel(groupRef.current, panels, "right")}
             side="right"
           />
         ) : (
           <PanelShell
             label="Chat"
             icon={<MessageCircle className="size-3.5" />}
-            onCollapse={() => rightRef.current?.collapse()}
+            onCollapse={() => collapseSidePanel(groupRef.current, panels, "right")}
             side="right"
           >
             <Right chatOnly className="w-full lg:w-full border-l-0" />
@@ -440,14 +525,14 @@ const DesktopLayout = ({ canMutate, overlays, panels }: DesktopLayoutProps) => {
           <CollapsedRail
             label="Settings"
             icon={<Settings className="size-3.5" />}
-            onClick={() => settingsRef.current?.expand()}
+            onClick={() => expandSidePanel(groupRef.current, panels, "settings")}
             side="right"
           />
         ) : (
           <PanelShell
             label="Settings"
             icon={<Settings className="size-3.5" />}
-            onCollapse={() => settingsRef.current?.collapse()}
+            onCollapse={() => collapseSidePanel(groupRef.current, panels, "settings")}
             side="right"
           >
             <SettingsPanel className="h-full" />
