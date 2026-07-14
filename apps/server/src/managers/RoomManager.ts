@@ -1656,6 +1656,24 @@ export class RoomManager {
     return true;
   }
 
+  /**
+   * Set a shape's display name. Empty string clears it (UI falls back to
+   * "Zone <id>"). Returns false if the shape doesn't exist.
+   */
+  setShapeName(shapeId: string, name: string): boolean {
+    const existing = this.shapes.get(shapeId);
+    if (!existing) return false;
+    const trimmed = name.trim().slice(0, 80);
+    const next = { ...existing };
+    if (trimmed.length === 0) {
+      delete next.name;
+    } else {
+      next.name = trimmed;
+    }
+    this.shapes.set(shapeId, next);
+    return true;
+  }
+
   setShapeGroup(shapeId: string, groupId: string | null): boolean {
     const existing = this.shapes.get(shapeId);
     if (!existing) return false;

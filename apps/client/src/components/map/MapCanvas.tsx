@@ -9,6 +9,7 @@ import { useClientId } from "@/hooks/useClientId";
 import { getShapeCircle, getShapePolygonRing, outwardOffsetPolygonRing } from "@/lib/geo";
 import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
+import { zoneDisplayName } from "@/lib/zoneName";
 import { useRoomStore } from "@/store/room";
 import { sendWSRequest } from "@/utils/ws";
 import type { MapTileLayerId, ShapeType } from "@beatsync/shared";
@@ -32,6 +33,17 @@ L.Marker.prototype.options.icon = DefaultIcon;
 
 interface MapCanvasProps {
   canMutate: boolean;
+}
+
+// Leaflet renders tooltip content strings as HTML, so user-entered zone names
+// must be escaped before interpolation.
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -472,9 +484,12 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
         layer.setLatLngs(coords as L.LatLngExpression[][]);
       }
 
-      // Tooltip shows the shape id; playlist details (track count, play state)
-      // are visible in the side panel that hosts the Queue/Player UI.
-      layer.bindTooltip(`<div class="text-xs"><strong>${shape.id.slice(0, 6)}</strong></div>`, {
+      // Tooltip shows the zone name (same fallback rule as the shape panel);
+      // playlist details (track count, play state) are visible in the side
+      // panel that hosts the Queue/Player UI. Names are user-entered and
+      // Leaflet renders tooltip strings as HTML, so escape them.
+      const tooltipLabel = escapeHtml(zoneDisplayName(shape));
+      layer.bindTooltip(`<div class="text-xs"><strong>${tooltipLabel}</strong></div>`, {
         permanent: false,
         direction: "top",
       });

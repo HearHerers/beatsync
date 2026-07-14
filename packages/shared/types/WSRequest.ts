@@ -49,6 +49,7 @@ export const ClientActionEnum = z.enum([
   "DELETE_SHAPE",
   "CLEAR_SHAPES",
   "SET_SHAPE_FALLOFF",
+  "SET_SHAPE_NAME",
   "SET_SHAPE_GROUP",
   "SET_MAP_METADATA",
   "SET_USERNAME",
@@ -278,6 +279,14 @@ export const SetShapeFalloffSchema = z.object({
 });
 export type SetShapeFalloffType = z.infer<typeof SetShapeFalloffSchema>;
 
+export const SetShapeNameSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.SET_SHAPE_NAME),
+  shapeId: z.string(),
+  /** Empty string clears the name (UI falls back to "Zone <id>"). */
+  name: z.string().max(80),
+});
+export type SetShapeNameType = z.infer<typeof SetShapeNameSchema>;
+
 export const SetShapeGroupSchema = z.object({
   type: z.literal(ClientActionEnum.enum.SET_SHAPE_GROUP),
   shapeId: z.string(),
@@ -350,6 +359,7 @@ export const WSRequestSchema = z.discriminatedUnion("type", [
   DeleteShapeSchema,
   ClearShapesSchema,
   SetShapeFalloffSchema,
+  SetShapeNameSchema,
   SetShapeGroupSchema,
   SetMapMetadataSchema,
   SetUsernameSchema,

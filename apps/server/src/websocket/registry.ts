@@ -36,6 +36,7 @@ import {
   handleSetGeoPosition,
   handleSetMapMetadata,
   handleSetShapeFalloff,
+  handleSetShapeName,
   handleSetShapeGroup,
   handleSetVisibility,
   handleUpdateShape,
@@ -184,6 +185,10 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.SET_SHAPE_FALLOFF]: {
     handle: handleSetShapeFalloff,
     description: "Set the edge-falloff distance (meters past the shape boundary at which gain hits 0)",
+  },
+  [ClientActionEnum.enum.SET_SHAPE_NAME]: {
+    handle: handleSetShapeName,
+    description: "Set or clear a shape's display name (empty = 'Zone <id>')",
   },
   [ClientActionEnum.enum.SET_SHAPE_GROUP]: {
     handle: handleSetShapeGroup,
