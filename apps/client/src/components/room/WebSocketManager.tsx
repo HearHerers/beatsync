@@ -264,9 +264,15 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
         } else if (scheduledAction.type === "PAUSE") {
           if (scheduledAction.contextId) {
             mapAudio.pauseShape(scheduledAction.contextId);
+            // trackTimeSeconds carries the position captured at the shared pause
+            // instant (Pause All) — mirror it so the Resume All button can see
+            // which zones are resumable. Without it the mirror keeps the stale
+            // position from the last PLAY (0 for zones started from the top).
             useGlobalStore.getState().setContextPlayback(scheduledAction.contextId, {
               type: "paused",
               audioSource: scheduledAction.audioSource,
+              trackPositionSeconds: scheduledAction.trackTimeSeconds,
+              serverTimeToExecute,
             });
           } else {
             schedulePause({ targetServerTime: serverTimeToExecute });
