@@ -43,7 +43,7 @@ async function main() {
 
   const rows = summaries.map((s) => [
     s.roomId,
-    s.roomName ?? "—",
+    (s.roomName ?? "—") + (s.archived ? " [archived]" : ""),
     s.roomType,
     s.zoneCount === null ? "—" : String(s.zoneCount),
     String(s.trackCount),
