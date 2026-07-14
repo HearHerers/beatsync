@@ -206,7 +206,7 @@ interface GlobalState extends GlobalStateValues {
   setSocket: (socket: WebSocket) => void;
   broadcastPlay: (trackTimeSeconds?: number) => void;
   broadcastPause: () => void;
-  broadcastPlayAll: (contextIds?: string[]) => void;
+  broadcastPlayAll: (contextIds?: string[], opts?: { resume?: boolean }) => void;
   broadcastPauseAll: (contextIds?: string[]) => void;
   startSpatialAudio: () => void;
   sendStopSpatialAudio: () => void;
@@ -1013,10 +1013,11 @@ export const useGlobalStore = create<GlobalState>((set, get) => {
     },
 
     // Start every eligible playlist context in the room, locked to one shared
-    // serverTimeToExecute (server-side coordinated batched play). Server picks
-    // eligible contexts (any playlist with tracks) and resets each to
-    // trackTimeSeconds=0 — phase-locking all zones to the same instant.
-    broadcastPlayAll: (contextIds?: string[]) => {
+    // serverTimeToExecute (server-side coordinated batched play). Default:
+    // server resets each context to trackTimeSeconds=0. With resume: paused
+    // contexts pick up from their captured position + tempo-sync rate, and
+    // already-playing contexts are left alone.
+    broadcastPlayAll: (contextIds?: string[], opts?: { resume?: boolean }) => {
       const state = get();
       const { socket } = getSocket(state);
       sendWSRequest({
@@ -1024,6 +1025,7 @@ export const useGlobalStore = create<GlobalState>((set, get) => {
         request: {
           type: ClientActionEnum.enum.PLAY_ALL_CONTEXTS,
           ...(contextIds && contextIds.length > 0 && { contextIds }),
+          ...(opts?.resume && { resume: true }),
         },
       });
     },

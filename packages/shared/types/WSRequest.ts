@@ -288,6 +288,15 @@ export type ImportTracksToContextType = z.infer<typeof ImportTracksToContextSche
 export const PlayAllContextsSchema = z.object({
   type: z.literal(ClientActionEnum.enum.PLAY_ALL_CONTEXTS),
   contextIds: z.array(z.string()).optional(),
+  /**
+   * true = resume: paused contexts restart from their stored position (and
+   * tempo-sync rate), already-playing contexts are left alone. Because
+   * PAUSE_ALL captures every position at one shared instant and resume
+   * restarts them at one shared instant, relative phase between zones —
+   * including beat-sync lock — survives a pause/resume cycle.
+   * false/omitted = restart every context from 0 at rate 1 (existing behavior).
+   */
+  resume: z.boolean().optional(),
 });
 export type PlayAllContextsType = z.infer<typeof PlayAllContextsSchema>;
 

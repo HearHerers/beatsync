@@ -487,21 +487,32 @@ export class RoomManager {
    * trackTimeSeconds=0 so they all phase-lock to the shared serverTimeToExecute.
    * Optional contextIds filter restricts to a subset.
    */
-  buildPlayAllActions(contextIds?: string[]): PlayActionType[] {
+  buildPlayAllActions(contextIds?: string[], opts: { resume?: boolean } = {}): PlayActionType[] {
     const filter = contextIds && contextIds.length > 0 ? new Set(contextIds) : undefined;
     const actions: PlayActionType[] = [];
     for (const playlist of this.playlists.values()) {
       if (filter && !filter.has(playlist.id)) continue;
       if (playlist.tracks.length === 0) continue;
+      // Resume mode never restarts a context that's already running.
+      if (opts.resume && playlist.playback.type === "playing") continue;
       const candidate = playlist.playback.audioSource || playlist.tracks[0].url;
       // Resilience: if the recorded audioSource has since been removed, fall back
       // to the first remaining track. Skip the context only if it's truly empty.
       const audioSource = playlist.tracks.some((t) => t.url === candidate) ? candidate : playlist.tracks[0]?.url;
       if (!audioSource) continue;
+      // Resume: pick up from the position captured by PAUSE_ALL (static while
+      // paused, so build-time computation is safe) at the preserved tempo-sync
+      // rate — restarting all zones at one shared instant keeps their relative
+      // phase (and any beat-sync lock) intact. Positions only resume for the
+      // track they were captured on; a swapped/removed track starts at 0.
+      const resumingSameTrack = opts.resume && audioSource === playlist.playback.audioSource;
+      const trackTimeSeconds = resumingSameTrack ? playlist.playback.trackPositionSeconds : 0;
+      const playbackRate = resumingSameTrack ? playlist.playback.playbackRate : 1;
       actions.push({
         type: "PLAY",
         audioSource,
-        trackTimeSeconds: 0,
+        trackTimeSeconds,
+        ...(playbackRate !== 1 && { playbackRate }),
         ...(playlist.id !== MAIN_CONTEXT_ID && { contextId: playlist.id }),
       });
     }
@@ -510,8 +521,10 @@ export class RoomManager {
 
   /**
    * Enumerate the pause actions that "Stop All" should fire — one per currently
-   * playing playlist context. Matches the existing per-context EnsembleControls
-   * semantic of resetting trackTimeSeconds to 0 on pause.
+   * playing playlist context. trackTimeSeconds here is a placeholder; the real
+   * position is captured in broadcastPauseAll at the shared execute time so
+   * every zone's position freezes at the same instant (which is what lets
+   * RESUME preserve relative phase between zones).
    */
   buildPauseAllActions(contextIds?: string[]): PauseActionType[] {
     const filter = contextIds && contextIds.length > 0 ? new Set(contextIds) : undefined;
@@ -700,12 +713,24 @@ export class RoomManager {
    * Pause every supplied context with one shared serverTimeToExecute. No load
    * handshake required — pause is fire-and-forget once the audio is already
    * scheduled.
+   *
+   * Each context's trackTimeSeconds is captured HERE, at the shared execute
+   * time (rate-aware: a tempo-synced zone's position advances at rate ×
+   * wall-clock). Freezing every zone at the same instant is what allows
+   * PLAY_ALL_CONTEXTS{resume} to restart them with relative phase — including
+   * beat-sync lock — preserved.
    */
   broadcastPauseAll(pauseActions: PauseActionType[], server: BunServer): void {
     if (pauseActions.length === 0) return;
     const serverTimeToExecute = this.getScheduledExecutionTime();
     let scheduled = 0;
     for (const pa of pauseActions) {
+      const ctxId = pa.contextId ?? MAIN_CONTEXT_ID;
+      const playback = this.playlists.get(ctxId)?.playback;
+      if (playback?.type === "playing" && pa.audioSource === playback.audioSource) {
+        const elapsedMs = serverTimeToExecute - playback.serverTimeToExecute;
+        pa.trackTimeSeconds = Math.max(0, playback.trackPositionSeconds + (playback.playbackRate * elapsedMs) / 1000);
+      }
       const success = this.updatePlaybackSchedulePause(pa, serverTimeToExecute);
       if (!success) continue;
       sendBroadcast({
