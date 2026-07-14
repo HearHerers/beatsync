@@ -73,6 +73,7 @@ describe("summarizeRoom", () => {
       chatMessageCount: 0,
       cachedClientCount: 0,
       hasAdminToken: true,
+      archived: false,
     });
   });
 

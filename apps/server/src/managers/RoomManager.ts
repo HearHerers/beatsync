@@ -106,6 +106,8 @@ const RoomBackupSchema = z.object({
   shapes: z.array(ShapeSchema).optional(),
   /** Recoverable per-room admin token (non-demo). */
   adminToken: z.string().optional(),
+  /** Operator soft-delete: hidden from discovery, joins rejected, R2 audio kept. */
+  archived: z.boolean().optional(),
 });
 export type RoomBackupType = z.infer<typeof RoomBackupSchema>;
 
@@ -240,6 +242,10 @@ export class RoomManager {
   private roomType: RoomTypeValue = "audio";
   private mapMetadata?: MapMetadataType;
   private roomName?: string;
+  // Operator soft-delete (see routes/admin.ts). Persisted in the room backup;
+  // an archived room stays resident with its R2 audio but is hidden from
+  // discovery and rejects new WS joins until unarchived.
+  private archived = false;
   // Admin-chosen room-wide default base map. Undefined = clients use their
   // build default (Mapbox if a token is set, else Esri).
   private defaultTileLayerId?: MapTileLayerId;
@@ -1175,6 +1181,7 @@ export class RoomManager {
       ...(this.defaultTileLayerId && { defaultTileLayerId: this.defaultTileLayerId }),
       ...(this.shapes.size > 0 && { shapes: Array.from(this.shapes.values()) }),
       ...(this.adminToken && { adminToken: this.adminToken }),
+      ...(this.archived && { archived: true }),
     };
   }
 
@@ -1201,6 +1208,28 @@ export class RoomManager {
     if (backup.shapes) {
       this.shapes.clear();
       for (const s of backup.shapes) this.shapes.set(s.id, s);
+    }
+  }
+
+  /** Operator soft-delete flag (persisted via createBackup / restore). */
+  isArchived(): boolean {
+    return this.archived;
+  }
+  setArchived(archived: boolean): void {
+    this.archived = archived;
+  }
+
+  /**
+   * Close every live WebSocket in the room (operator archive/delete). The
+   * close handlers take care of client removal and last-disconnect logic.
+   */
+  evictAllClients(reason: string): void {
+    for (const ws of this.wsConnections.values()) {
+      try {
+        ws.close(1000, reason);
+      } catch {
+        // socket already closing/closed — removeClient will still run
+      }
     }
   }
 

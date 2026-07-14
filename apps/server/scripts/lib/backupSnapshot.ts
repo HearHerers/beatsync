@@ -16,13 +16,11 @@ export interface BackupSnapshot {
   backup: ServerBackupType;
 }
 
-// Ask the running server to write a fresh backup right now (POST /admin/backup
-// with the OPERATOR_SECRET bearer), so the snapshot we then read reflects
-// current state instead of being up to ~60s stale. Requires OPERATOR_SECRET in
-// the environment — apps/server/.env is shared between the server and these
-// scripts — and the server to be reachable at SERVER_URL (default
-// http://localhost:8080).
-export async function requestSyncBackup(): Promise<void> {
+// Call the running server's operator API (/admin/*) with the OPERATOR_SECRET
+// bearer. Requires OPERATOR_SECRET in the environment — apps/server/.env is
+// shared between the server and these scripts — and the server to be reachable
+// at SERVER_URL (default http://localhost:8080).
+export async function operatorRequest(path: string, method: "POST" | "DELETE" = "POST"): Promise<unknown> {
   const secret = process.env.OPERATOR_SECRET ?? "";
   if (!secret) {
     throw new Error("OPERATOR_SECRET is not set. Add it to apps/server/.env (server and scripts share it).");
@@ -30,18 +28,27 @@ export async function requestSyncBackup(): Promise<void> {
   const base = (process.env.SERVER_URL ?? "http://localhost:8080").replace(/\/$/, "");
   let res: Response;
   try {
-    res = await fetch(`${base}/admin/backup`, {
-      method: "POST",
+    res = await fetch(`${base}${path}`, {
+      method,
       headers: { authorization: `Bearer ${secret}` },
     });
   } catch (err) {
     throw new Error(`Could not reach ${base} (${err instanceof Error ? err.message : String(err)}).`);
   }
   if (!res.ok) {
+    const body = await res.text().catch(() => "");
     throw new Error(
-      `${base}/admin/backup returned ${res.status}. Is the server running with the same OPERATOR_SECRET?`
+      `${base}${path} returned ${res.status}${body ? ` (${body})` : ""}. ` +
+        "Is the server running with the same OPERATOR_SECRET?"
     );
   }
+  return res.json();
+}
+
+// Ask the running server to write a fresh backup right now, so the snapshot we
+// then read reflects current state instead of being up to ~60s stale.
+export async function requestSyncBackup(): Promise<void> {
+  await operatorRequest("/admin/backup");
 }
 
 export async function loadLatestBackup(): Promise<BackupSnapshot> {
@@ -93,6 +100,7 @@ export interface RoomSummary {
   chatMessageCount: number;
   cachedClientCount: number;
   hasAdminToken: boolean;
+  archived: boolean;
 }
 
 export function summarizeRoom(roomId: string, room: RoomBackupType): RoomSummary {
@@ -107,5 +115,6 @@ export function summarizeRoom(roomId: string, room: RoomBackupType): RoomSummary
     chatMessageCount: room.chat?.messages.length ?? 0,
     cachedClientCount: room.clientDatas.length,
     hasAdminToken: Boolean(room.adminToken),
+    archived: room.archived ?? false,
   };
 }

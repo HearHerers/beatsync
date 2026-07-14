@@ -83,6 +83,7 @@ async function main() {
           roomId,
           roomName: room.roomName ?? null,
           roomType,
+          archived: room.archived ?? false,
           globalVolume: room.globalVolume,
           lowPassFreq: room.lowPassFreq,
           chatMessageCount: room.chat?.messages.length ?? 0,
@@ -104,7 +105,7 @@ async function main() {
   }
 
   const title = room.roomName ? `"${room.roomName}"` : "(unnamed)";
-  console.log(`Room ${roomId} — ${title} · ${roomType} room`);
+  console.log(`Room ${roomId} — ${title} · ${roomType} room${room.archived ? " · ARCHIVED" : ""}`);
   console.log(`Backup: ${key} (~${ageMinutes}m old)`);
   const token = room.adminToken
     ? flags.has("--show-token")

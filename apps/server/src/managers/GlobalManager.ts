@@ -134,6 +134,9 @@ export class GlobalManager {
   getActiveRooms(): DiscoverRoomsType {
     const activeRooms = Array.from(this.rooms.values())
       .filter((room) => {
+        // Operator-archived rooms are hidden from discovery
+        if (room.isArchived()) return false;
+
         // Room must have active connections
         if (!room.hasActiveConnections()) return false;
 
