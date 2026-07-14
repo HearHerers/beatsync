@@ -40,8 +40,26 @@ export type MapMetadataType = z.infer<typeof MapMetadataSchema>;
 export const MapTileLayerIdEnum = z.enum(["mapbox", "esri", "michigan", "street"]);
 export type MapTileLayerId = z.infer<typeof MapTileLayerIdEnum>;
 
+/**
+ * Compact constant-tempo beatgrid for a track, extracted from DJ software
+ * (see rekordbox-integration/). Sufficient for quantized electronic music:
+ * beat k lands at firstDownbeatSec + k·60/bpm. Tracks whose grid is dynamic
+ * (multiple tempos) are not representable here and stay un-synced in v1.
+ */
+export const BeatgridSchema = z.object({
+  bpm: z.number().positive(),
+  /** Seconds into the track of the first gridded beat (any beat-in-bar). */
+  firstBeatSec: z.number().min(0),
+  /** Seconds into the track of the first downbeat (beat 1 of a bar). */
+  firstDownbeatSec: z.number().min(0),
+  beatsPerBar: z.number().int().positive().default(4),
+});
+export type BeatgridType = z.infer<typeof BeatgridSchema>;
+
 export const AudioSourceSchema = z.object({
   url: z.string(),
+  /** Present once a curator imports beatgrid data for this track. */
+  beatgrid: BeatgridSchema.optional(),
 });
 export type AudioSourceType = z.infer<typeof AudioSourceSchema>;
 
