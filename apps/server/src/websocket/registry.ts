@@ -17,11 +17,15 @@ import { handleSetGlobalVolume } from "@/websocket/handlers/setGlobalVolume";
 import { handleSetListeningSource } from "@/websocket/handlers/setListeningSource";
 import { handleStartSpatialAudio } from "@/websocket/handlers/startSpatialAudio";
 import { handleStopSpatialAudio } from "@/websocket/handlers/stopSpatialAudio";
-import { handleReorderAudioSources } from "@/websocket/handlers/handleReorderAudioSources";
 import { handleSetMetronome } from "@/websocket/handlers/setMetronome";
 import { handleSetLowPassFreq } from "@/websocket/handlers/setLowPassFreq";
 import { handleSetContextLoop } from "@/websocket/handlers/setContextLoop";
-import { handleAddTrackToContext, handleRemoveTrackFromContext } from "@/websocket/handlers/contextTracks";
+import {
+  handleAddTrackToContext,
+  handleImportTracksToContext,
+  handleRemoveTrackFromContext,
+  handleReorderTrackInContext,
+} from "@/websocket/handlers/contextTracks";
 import { handleSetUsername } from "@/websocket/handlers/setUsername";
 import { handleSync } from "@/websocket/handlers/sync";
 import {
@@ -132,10 +136,6 @@ export const WS_REGISTRY: WebsocketRegistry = {
     handle: handleSendChatMessage,
     description: "Send a chat message to all clients in the room",
   },
-  [ClientActionEnum.enum.REORDER_AUDIO_SOURCES]: {
-    handle: handleReorderAudioSources,
-    description: "Reorder audio sources in the room queue",
-  },
   [ClientActionEnum.enum.SET_METRONOME]: {
     handle: handleSetMetronome,
     description: "Toggle metronome on/off for all clients in the room",
@@ -155,6 +155,14 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.REMOVE_TRACK_FROM_CONTEXT]: {
     handle: handleRemoveTrackFromContext,
     description: "Remove a track from a specific playlist context",
+  },
+  [ClientActionEnum.enum.REORDER_TRACK_IN_CONTEXT]: {
+    handle: handleReorderTrackInContext,
+    description: "Reorder the tracks within a specific playlist context",
+  },
+  [ClientActionEnum.enum.IMPORT_TRACKS_TO_CONTEXT]: {
+    handle: handleImportTracksToContext,
+    description: "Bulk-add tracks from an imported playlist file to a context",
   },
 
   // ── Map-room handlers ─────────────────────────────────────────────

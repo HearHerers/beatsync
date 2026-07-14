@@ -233,34 +233,95 @@ describe("syncClient", () => {
   });
 });
 
-describe("reorderAudioSource", () => {
-  it("should reorder audio sources when lengths match", () => {
+describe("reorderTrackInContext", () => {
+  const CTX = "shape-1";
+  const navidromeSource = {
+    url: "https://navidrome.example.com/stream/track-42.mp3",
+    // Extra provider metadata that must survive a reorder.
+    title: "Zone Anthem",
+    artist: "DJ Test",
+  };
+  const s3Source = { url: "https://s3.example.com/room-x/song.mp3" };
+
+  function roomWithShapePlaylist(): RoomManager {
     const room = new RoomManager(ROOM_ID);
-    const source1 = { url: "https://example.com/a.mp3" };
-    const source2 = { url: "https://example.com/b.mp3" };
-    const source3 = { url: "https://example.com/c.mp3" };
-    room.addAudioSource(source1);
-    room.addAudioSource(source2);
-    room.addAudioSource(source3);
+    room.addPlaylist(CTX, { loop: true });
+    room.addTrackToContext(CTX, s3Source);
+    room.addTrackToContext(CTX, navidromeSource);
+    return room;
+  }
 
-    const result = room.reorderAudioSource([source3, source1, source2]);
+  it("reorders a non-main context playlist by URL", () => {
+    const room = roomWithShapePlaylist();
 
-    expect(result).toBeUndefined();
-    const sources = room.getAudioSources();
-    expect(sources[0].url).toBe("https://example.com/c.mp3");
-    expect(sources[1].url).toBe("https://example.com/a.mp3");
-    expect(sources[2].url).toBe("https://example.com/b.mp3");
+    const result = room.reorderTrackInContext(CTX, [navidromeSource.url, s3Source.url]);
+
+    expect(result).toBeInstanceOf(Array);
+    const tracks = room.getPlaylist(CTX)!.tracks;
+    expect(tracks.map((t) => t.url)).toEqual([navidromeSource.url, s3Source.url]);
   });
 
-  it("should return an error when lengths do not match", () => {
+  it("preserves source provider metadata (e.g. Navidrome fields) through reorder", () => {
+    const room = roomWithShapePlaylist();
+
+    room.reorderTrackInContext(CTX, [navidromeSource.url, s3Source.url]);
+
+    const moved = room.getPlaylist(CTX)!.tracks[0] as typeof navidromeSource;
+    expect(moved).toEqual(navidromeSource);
+  });
+
+  it("reorders the main context and reflects in getAudioSources", () => {
     const room = new RoomManager(ROOM_ID);
     room.addAudioSource({ url: "https://example.com/a.mp3" });
     room.addAudioSource({ url: "https://example.com/b.mp3" });
 
-    const result = room.reorderAudioSource([{ url: "https://example.com/a.mp3" }]);
+    const result = room.reorderTrackInContext("main", ["https://example.com/b.mp3", "https://example.com/a.mp3"]);
+
+    expect(result).toBeInstanceOf(Array);
+    expect(room.getAudioSources().map((t) => t.url)).toEqual([
+      "https://example.com/b.mp3",
+      "https://example.com/a.mp3",
+    ]);
+  });
+
+  it("returns undefined for an unknown context", () => {
+    const room = roomWithShapePlaylist();
+    expect(room.reorderTrackInContext("does-not-exist", [s3Source.url])).toBeUndefined();
+  });
+
+  it("rejects a length mismatch and leaves order unchanged", () => {
+    const room = roomWithShapePlaylist();
+
+    const result = room.reorderTrackInContext(CTX, [s3Source.url]);
 
     expect(result).toBeInstanceOf(Error);
-    // Original order should be unchanged
-    expect(room.getAudioSources()).toHaveLength(2);
+    expect(room.getPlaylist(CTX)!.tracks.map((t) => t.url)).toEqual([s3Source.url, navidromeSource.url]);
+  });
+
+  it("rejects a non-permutation (unknown or duplicate URL) and leaves order unchanged", () => {
+    const room = roomWithShapePlaylist();
+
+    const unknown = room.reorderTrackInContext(CTX, [s3Source.url, "https://example.com/ghost.mp3"]);
+    expect(unknown).toBeInstanceOf(Error);
+
+    const dup = room.reorderTrackInContext(CTX, [s3Source.url, s3Source.url]);
+    expect(dup).toBeInstanceOf(Error);
+
+    expect(room.getPlaylist(CTX)!.tracks.map((t) => t.url)).toEqual([s3Source.url, navidromeSource.url]);
+  });
+
+  it("leaves the currently-playing track intact when reordering a playing context", () => {
+    const room = roomWithShapePlaylist();
+    const playlist = room.getPlaylist(CTX)!;
+    // Simulate the navidrome track currently scheduled to play.
+    playlist.playback = { ...playlist.playback, type: "playing", audioSource: navidromeSource.url };
+
+    room.reorderTrackInContext(CTX, [navidromeSource.url, s3Source.url]);
+
+    const after = room.getPlaylist(CTX)!;
+    expect(after.playback.audioSource).toBe(navidromeSource.url);
+    expect(after.playback.type).toBe("playing");
+    // The reorder still applied.
+    expect(after.tracks.map((t) => t.url)).toEqual([navidromeSource.url, s3Source.url]);
   });
 });

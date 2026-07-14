@@ -1402,15 +1402,6 @@ export class RoomManager {
     }
   }
 
-  reorderAudioSource(newOrder: AudioSourceType[]): void | Error {
-    if (newOrder.length !== this.audioSources.length) {
-      console.warn(`Attempted to reorder audio sources with mismatched length in room ${this.roomId}`);
-      return new Error(`Mismatched audio sources length`);
-    }
-
-    this.audioSources = newOrder;
-  }
-
   // ── Per-context playlist API ────────────────────────────────────────
   //
   // The methods above all operate on the "main" context implicitly via the
@@ -1481,6 +1472,28 @@ export class RoomManager {
   }
 
   /**
+   * Append multiple tracks to a context in order, de-duplicating by URL against
+   * both the existing playlist and earlier entries in the same batch. Used by
+   * playlist import. Returns the updated tracks, or undefined if the playlist
+   * doesn't exist.
+   */
+  addTracksToContext(contextId: string, sources: AudioSourceType[]): AudioSourceType[] | undefined {
+    const playlist = this.playlists.get(contextId);
+    if (!playlist) return undefined;
+    const seen = new Set(playlist.tracks.map((t) => t.url));
+    const additions: AudioSourceType[] = [];
+    for (const source of sources) {
+      if (seen.has(source.url)) continue;
+      seen.add(source.url);
+      additions.push(source);
+    }
+    if (additions.length > 0) {
+      playlist.tracks = [...playlist.tracks, ...additions];
+    }
+    return playlist.tracks;
+  }
+
+  /**
    * Remove a track from a specific context's playlist. If the removed track was
    * currently playing, the playback resets to paused. Returns { tracks,
    * removedCurrent } or undefined if the playlist is missing.
@@ -1497,6 +1510,39 @@ export class RoomManager {
       playlist.playback = { ...INITIAL_PLAYLIST_PLAYBACK };
     }
     return { tracks: playlist.tracks, removedCurrent: removingCurrent };
+  }
+
+  /**
+   * Reorder a context's playlist to match `orderedUrls`. `orderedUrls` must be a
+   * permutation of the playlist's current track URLs — same length and same set;
+   * otherwise the order is stale (e.g. a concurrent add/remove) and is rejected
+   * so the client can resync from the authoritative snapshot. The existing source
+   * objects are reused, so S3/Navidrome metadata is preserved. Playback is keyed
+   * by URL (not index), so reordering a playing playlist is safe and leaves the
+   * current track untouched. Returns the reordered tracks, undefined if the
+   * playlist doesn't exist, or an Error if `orderedUrls` isn't a permutation.
+   */
+  reorderTrackInContext(contextId: string, orderedUrls: string[]): AudioSourceType[] | Error | undefined {
+    const playlist = this.playlists.get(contextId);
+    if (!playlist) return undefined;
+
+    const byUrl = new Map(playlist.tracks.map((t) => [t.url, t]));
+    if (orderedUrls.length !== playlist.tracks.length) {
+      return new Error(`Reorder length mismatch for context ${contextId} in room ${this.roomId}`);
+    }
+    const reordered: AudioSourceType[] = [];
+    const seen = new Set<string>();
+    for (const url of orderedUrls) {
+      const source = byUrl.get(url);
+      if (!source || seen.has(url)) {
+        return new Error(`Reorder is not a permutation of context ${contextId} tracks in room ${this.roomId}`);
+      }
+      seen.add(url);
+      reordered.push(source);
+    }
+
+    playlist.tracks = reordered;
+    return reordered;
   }
 
   /**
