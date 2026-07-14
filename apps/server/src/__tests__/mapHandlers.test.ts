@@ -39,6 +39,7 @@ import {
   handleSetGeoPosition,
   handleSetMapMetadata,
   handleSetShapeFalloff,
+  handleSetShapeName,
   handleSetShapeGroup,
   handleSetVisibility,
   handleUpdateShape,
@@ -215,6 +216,50 @@ describe("handleSetShapeFalloff / handleSetShapeGroup", () => {
     ev = lastEventOfType("SHAPES_UPDATE");
     if (ev.type !== "SHAPES_UPDATE") throw new Error("unreachable");
     expect(ev.shapes[0].groupId).toBe("g42");
+  });
+});
+
+describe("handleSetShapeName", () => {
+  it("sets the name and broadcasts SHAPES_UPDATE", () => {
+    const { room, adminWs, server } = freshMapRoom();
+    room.addShape(makeShape("s1"));
+    broadcasts = [];
+    void handleSetShapeName({
+      ws: adminWs,
+      message: { type: "SET_SHAPE_NAME", shapeId: "s1", name: "Stage" },
+      server,
+    });
+    const ev = lastEventOfType("SHAPES_UPDATE");
+    if (ev.type !== "SHAPES_UPDATE") throw new Error("unreachable");
+    expect(ev.shapes[0].name).toBe("Stage");
+    expect(room.getShape("s1")?.name).toBe("Stage");
+  });
+
+  it("clears the name when given empty string", () => {
+    const { room, adminWs, server } = freshMapRoom();
+    room.addShape(makeShape("s1"));
+    room.setShapeName("s1", "Pre-existing");
+    broadcasts = [];
+    void handleSetShapeName({
+      ws: adminWs,
+      message: { type: "SET_SHAPE_NAME", shapeId: "s1", name: "" },
+      server,
+    });
+    expect(room.getShape("s1")?.name).toBeUndefined();
+  });
+
+  it("trims whitespace and truncates to 80 chars", () => {
+    const { room } = freshMapRoom();
+    room.addShape(makeShape("s1"));
+    room.setShapeName("s1", "  Stage  ");
+    expect(room.getShape("s1")?.name).toBe("Stage");
+    room.setShapeName("s1", "x".repeat(200));
+    expect(room.getShape("s1")?.name?.length).toBe(80);
+  });
+
+  it("no-op when shape doesn't exist", () => {
+    const { room } = freshMapRoom();
+    expect(room.setShapeName("ghost", "Stage")).toBe(false);
   });
 });
 
