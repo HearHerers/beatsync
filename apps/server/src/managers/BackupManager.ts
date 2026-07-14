@@ -1,6 +1,8 @@
 import pLimit from "p-limit";
+import { isTombstonedAt, loadRegistry } from "@/admin/registry";
 import {
   deleteObject,
+  deleteObjectsWithPrefix,
   downloadJSON,
   getLatestFileWithPrefix,
   getSortedFilesWithPrefix,
@@ -77,6 +79,8 @@ export class BackupManager {
         room.restoreChatHistory(roomData.chat);
         console.log(`Room ${roomId}: Restored ${roomData.chat.messages.length} chat messages`);
       }
+
+      if (roomData.archived) room.setArchived(true);
 
       // Rooms are permanent (non-demo): keep restored rooms resident even with no
       // clients. We do NOT schedule cleanup here — deletion is explicit only.
@@ -165,8 +169,9 @@ export class BackupManager {
 
       if (!latestBackupKey) {
         console.log("📭 No backups found");
-        // No automatic orphan deletion: room audio is permanent and only removed
-        // by an explicit `bun run cleanup:live`. See routes/cleanup.ts.
+        // No automatic orphan deletion: room audio is permanent. There is
+        // currently no deletion path; the operator API (OPERATOR_ROOM_MANAGEMENT.md)
+        // will add an explicit, tombstoned one.
         return false;
       }
 
@@ -188,11 +193,23 @@ export class BackupManager {
 
       const backupData = parseResult.data;
 
+      // Tombstone guard: skip rooms the operator hard-deleted after this backup
+      // was written (and self-heal any R2 audio the delete left behind). A room
+      // re-created after its deletion has a newer backup timestamp and restores
+      // normally.
+      await loadRegistry();
+      const roomEntries = Object.entries(backupData.data.rooms).filter(([roomId]) => {
+        if (!isTombstonedAt(roomId, backupData.timestamp)) return true;
+        console.log(`🪦 Skipping tombstoned room ${roomId} (deleted after this backup was written)`);
+        deleteObjectsWithPrefix(`room-${roomId}`).catch((error) => {
+          console.error(`Failed to self-heal R2 audio for tombstoned room ${roomId}:`, error);
+        });
+        return false;
+      });
+
       // Get configurable concurrency limit
       const concurrency = this.DEFAULT_RESTORE_CONCURRENCY;
       const limit = pLimit(concurrency);
-
-      const roomEntries = Object.entries(backupData.data.rooms);
       console.log(`🔄 Restoring ${roomEntries.length} rooms with concurrency limit of ${concurrency}...`);
 
       // Process rooms in parallel with concurrency control using p-limit
@@ -241,8 +258,9 @@ export class BackupManager {
         });
       }
 
-      // No automatic orphan deletion after restore: room audio is permanent and
-      // only removed by an explicit `bun run cleanup:live`. See routes/cleanup.ts.
+      // No automatic orphan deletion after restore: room audio is permanent.
+      // There is currently no deletion path; the operator API
+      // (OPERATOR_ROOM_MANAGEMENT.md) will add an explicit, tombstoned one.
       return true;
     } catch (error) {
       console.error("❌ State restore failed:", error);

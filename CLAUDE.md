@@ -22,8 +22,23 @@ bun build                # Build all packages
 # Server-specific (run from apps/server/)
 bun test                 # Run tests (Bun test runner)
 bun test --watch         # Watch mode
-bun run cleanup          # Dry-run orphaned R2 room cleanup
-bun run cleanup:live     # Delete orphaned R2 rooms
+bun run rooms:list       # List persisted rooms from the latest R2 backup (offline)
+bun run room:info <id>   # Room detail: zones, playlists, clients (offline)
+# Both accept --sync: asks the running server (POST /admin/backup, needs
+# OPERATOR_SECRET) to write a fresh backup first instead of reading up-to-60s-stale data.
+bun run room:archive <id>    # Soft delete: evict + hide + reject joins; reversible
+bun run room:unarchive <id>  # Reverse an archive
+bun run room:delete <id> --yes  # HARD delete: purge state + R2 audio, tombstoned
+bun run rooms:purge --yes    # HARD delete EVERY room + all audio (incl. orphans)
+# The mutations call the running server's /admin API (OPERATOR_SECRET bearer).
+# On hosts where nested `bun` isn't on the package-script shell's PATH (e.g. the
+# deploy server), invoke the script files directly instead of the `bun run` aliases:
+#   bun scripts/rooms-list.ts [--sync]
+#   bun scripts/room-info.ts <id> [--sync]
+#   bun scripts/room-manage.ts archive|unarchive <id>
+#   bun scripts/room-manage.ts delete <id> --yes
+#   bun scripts/room-manage.ts purge [--yes]
+#   bun scripts/room-admin-token.ts <id>
 bun run type-check       # tsc --noEmit
 
 # Client-specific (run from apps/client/)
@@ -110,6 +125,7 @@ S3_PUBLIC_URL=
 S3_ENDPOINT=
 S3_ACCESS_KEY_ID=
 S3_SECRET_ACCESS_KEY=
+OPERATOR_SECRET=        # optional; enables /admin/* (fail-closed 404 when unset) and rooms:list/room:info --sync
 ```
 
 ## Deployment
@@ -123,5 +139,6 @@ S3_SECRET_ACCESS_KEY=
 - No testing framework on the client; server uses `bun test` with sinon for stubs
 - Server uses native `Bun.serve()` with URL pathname switch routing (not Hono's router)
 - Room IDs are 6-digit codes
-- **Rooms are permanent (non-demo).** Room state and uploaded R2 audio are NEVER auto-deleted — not on disconnect, not on restart, not by startup orphan-cleanup. Deletion is explicit only (`bun run cleanup:live`). On last disconnect the room releases per-room intervals and backs up, but stays resident. Persisted state (R2 backups, every 60s + on last disconnect) is authoritative and restored before the server accepts connections. Only the **demo** room (`IS_DEMO_MODE`) is ephemeral (60s cleanup + delete).
+- **Rooms are permanent (non-demo).** Room state and uploaded R2 audio are NEVER auto-deleted — not on disconnect, not on restart, not by startup orphan-cleanup. On last disconnect the room releases per-room intervals and backs up, but stays resident. Persisted state (R2 backups, every 60s + on last disconnect) is authoritative and restored before the server accepts connections. Only the **demo** room (`IS_DEMO_MODE`) is ephemeral (60s cleanup + delete). Inspect persisted rooms offline with `bun run rooms:list` / `bun run room:info <id>` (they read the latest R2 backup; add `--sync` to have the running server write a fresh one first).
+- **Deletion is operator-only, via the `/admin/*` API** (`OPERATOR_SECRET` bearer; fail-closed `404` when the secret is unset; see `OPERATOR_ROOM_MANAGEMENT.md` at the workspace root above this repo). **Archive** (`room:archive`) is the reversible first choice: clients evicted, room hidden from `/discover` and new joins rejected, but state + R2 audio kept (`archived` flag in the room backup). **Delete** (`room:delete <id> --yes`) evicts, purges `room-{id}` R2 objects, drops the room, and writes a tombstone (`operator/registry.json`, roomId → deletedAt) so restores from backups older than the deletion skip the room — while a room re-created later with the same id restores normally (restore compares the backup timestamp against deletedAt).
 - **Admin is a recoverable per-room token**, not first-joiner-wins. The first connector to a brand-new room becomes admin and mints the token (handed to that client via `SET_ADMIN_TOKEN`, stored in `localStorage`, re-presented on connect as `?roomAdminToken=`). Anyone presenting the token becomes a co-curator; everyone else is a listener. No random promotion when an admin leaves. Recover a lost token server-side with `bun run room:admin-token <roomId>`.
