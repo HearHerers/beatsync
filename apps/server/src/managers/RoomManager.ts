@@ -201,6 +201,20 @@ export class RoomManager {
     this.getMainPlaylist().pendingPlay = value;
   }
 
+  /**
+   * In-flight batched-play coordinator. While set, completed per-context load
+   * gates whose contextId is in `waitingOn` defer scheduling to flushBatch
+   * instead of calling broadcastPlay individually — so every batched context
+   * shares one serverTimeToExecute and starts in musical phase. Cleared on
+   * flush (either last context loaded, or batch timeout).
+   */
+  private pendingBatch?: {
+    waitingOn: Set<string>;
+    playActions: Map<string, PlayActionType>;
+    timeout: NodeJS.Timeout;
+    server: BunServer;
+  };
+
   private listeningSource: PositionType = {
     x: GRID.ORIGIN_X,
     y: GRID.ORIGIN_Y,
@@ -401,8 +415,19 @@ export class RoomManager {
     console.log(`Room ${this.roomId} ctx=${id}: ${loadedCount}/${totalCount} clients loaded audio`);
 
     if (this.allClientsLoadedPendingSource(id)) {
-      console.log(`Room ${this.roomId} ctx=${id}: All clients loaded. Starting playback.`);
-      this.executeScheduledPlay(server, id);
+      // If this context belongs to an in-flight batch, defer scheduling to the
+      // batch coordinator so every batched context shares one serverTimeToExecute.
+      if (this.pendingBatch?.waitingOn.has(id)) {
+        console.log(`Room ${this.roomId} ctx=${id}: All clients loaded (batched). Awaiting siblings.`);
+        this.pendingBatch.waitingOn.delete(id);
+        this.clearAudioLoadingState(id);
+        if (this.pendingBatch.waitingOn.size === 0) {
+          this.flushBatch(server);
+        }
+      } else {
+        console.log(`Room ${this.roomId} ctx=${id}: All clients loaded. Starting playback.`);
+        this.executeScheduledPlay(server, id);
+      }
     }
   }
 
@@ -449,6 +474,247 @@ export class RoomManager {
     } else {
       console.warn(`Failed to execute play - track may have been removed: ${playAction.audioSource}`);
     }
+  }
+
+  /**
+   * Enumerate the play actions that "Start All" should fire — one per playlist
+   * context that has at least one track. Restarts every eligible context from
+   * trackTimeSeconds=0 so they all phase-lock to the shared serverTimeToExecute.
+   * Optional contextIds filter restricts to a subset.
+   */
+  buildPlayAllActions(contextIds?: string[]): PlayActionType[] {
+    const filter = contextIds && contextIds.length > 0 ? new Set(contextIds) : undefined;
+    const actions: PlayActionType[] = [];
+    for (const playlist of this.playlists.values()) {
+      if (filter && !filter.has(playlist.id)) continue;
+      if (playlist.tracks.length === 0) continue;
+      const candidate = playlist.playback.audioSource || playlist.tracks[0].url;
+      // Resilience: if the recorded audioSource has since been removed, fall back
+      // to the first remaining track. Skip the context only if it's truly empty.
+      const audioSource = playlist.tracks.some((t) => t.url === candidate) ? candidate : playlist.tracks[0]?.url;
+      if (!audioSource) continue;
+      actions.push({
+        type: "PLAY",
+        audioSource,
+        trackTimeSeconds: 0,
+        ...(playlist.id !== MAIN_CONTEXT_ID && { contextId: playlist.id }),
+      });
+    }
+    return actions;
+  }
+
+  /**
+   * Enumerate the pause actions that "Stop All" should fire — one per currently
+   * playing playlist context. Matches the existing per-context EnsembleControls
+   * semantic of resetting trackTimeSeconds to 0 on pause.
+   */
+  buildPauseAllActions(contextIds?: string[]): PauseActionType[] {
+    const filter = contextIds && contextIds.length > 0 ? new Set(contextIds) : undefined;
+    const actions: PauseActionType[] = [];
+    for (const playlist of this.playlists.values()) {
+      if (filter && !filter.has(playlist.id)) continue;
+      if (playlist.playback.type !== "playing") continue;
+      actions.push({
+        type: "PAUSE",
+        audioSource: playlist.playback.audioSource,
+        trackTimeSeconds: 0,
+        ...(playlist.id !== MAIN_CONTEXT_ID && { contextId: playlist.id }),
+      });
+    }
+    return actions;
+  }
+
+  /**
+   * Batched audio-load coordination + synchronized play across multiple contexts.
+   * Broadcasts LOAD_AUDIO_SOURCE per context, waits for all clients to ack every
+   * context (or the batch timeout to fire), then emits one SCHEDULED_ACTION per
+   * context with a SHARED serverTimeToExecute — locking every zone to the same
+   * wall-clock instant and (when loops are commensurate) the same musical phase.
+   *
+   * Per-context pendingPlay state is still used so processClientLoadedAudioSource
+   * can route acks. Individual per-context timeouts are disabled (sentinel
+   * timeout that never fires within the batch window); the batch's own timeout
+   * is the only one that schedules. This avoids racing siblings into individual
+   * broadcastPlay calls that would each compute their own serverTimeToExecute.
+   */
+  initiateBatchedPlay(playActions: PlayActionType[], initiatorClientId: string, server: BunServer): void {
+    if (playActions.length === 0) return;
+
+    // Discard any previous batch and any per-context load state for these contexts.
+    this.clearPendingBatch();
+    for (const pa of playActions) {
+      this.clearAudioLoadingState(pa.contextId);
+    }
+
+    // Pre-validate each play action against its playlist; skip the ones that can't be played.
+    const validActions: { playlist: PlaylistRuntime; playAction: PlayActionType; audioSource: AudioSourceType }[] = [];
+    for (const pa of playActions) {
+      const ctxId = pa.contextId ?? MAIN_CONTEXT_ID;
+      const playlist = this.resolvePlaylist(ctxId, "initiateBatchedPlay");
+      if (!playlist) continue;
+      const audioSource = playlist.tracks.find((s) => s.url === pa.audioSource);
+      if (!audioSource) {
+        console.warn(`Batched play: skipping ${pa.audioSource} on ctx=${ctxId} (not in playlist)`);
+        continue;
+      }
+      validActions.push({ playlist, playAction: pa, audioSource });
+    }
+    if (validActions.length === 0) return;
+
+    // No connected clients → schedule immediately, no need to wait on acks.
+    const clientCount = this.getClients().length;
+    if (clientCount === 0) {
+      this.flushBatchActions(
+        validActions.map((v) => v.playAction),
+        server
+      );
+      return;
+    }
+
+    // Build batch state. Per-context pendingPlay timeouts are sentinels — the
+    // batch-level timeout is the only one that fires within the wait window.
+    const waitingOn = new Set<string>(validActions.map((v) => v.playlist.id));
+    const playActionMap = new Map<string, PlayActionType>();
+    for (const v of validActions) playActionMap.set(v.playlist.id, v.playAction);
+
+    const batchTimeout = setTimeout(() => {
+      console.log(
+        `Batched play timeout reached after ${RoomManager.AUDIO_LOAD_TIMEOUT_MS}ms in room ${this.roomId}. Flushing with whatever is loaded.`
+      );
+      this.flushBatch(server);
+    }, RoomManager.AUDIO_LOAD_TIMEOUT_MS);
+
+    this.pendingBatch = {
+      waitingOn,
+      playActions: playActionMap,
+      timeout: batchTimeout,
+      server,
+    };
+
+    // Sentinel timeout: large enough that the batch's own timeout fires first.
+    // Cleared by flushBatch / clearAudioLoadingState before then.
+    const SENTINEL_TIMEOUT_MS = RoomManager.AUDIO_LOAD_TIMEOUT_MS + 60_000;
+
+    // For each context: set up per-context pendingPlay and broadcast LOAD_AUDIO_SOURCE.
+    for (const { playlist, playAction, audioSource } of validActions) {
+      const ctxId = playlist.id;
+      playlist.pendingPlay = {
+        clientsLoaded: new Set([initiatorClientId]),
+        timeout: setTimeout(() => {
+          // No-op: the batch coordinator owns scheduling. Guard in case the
+          // sentinel ever does fire (shouldn't, but defensive).
+        }, SENTINEL_TIMEOUT_MS),
+        playAction,
+        initiatorClientId,
+        server,
+      };
+
+      sendBroadcast({
+        server,
+        roomId: this.roomId,
+        message: {
+          type: "ROOM_EVENT",
+          event: {
+            type: "LOAD_AUDIO_SOURCE",
+            audioSourceToPlay: audioSource,
+            ...(ctxId !== MAIN_CONTEXT_ID && { contextId: ctxId }),
+          },
+        },
+      });
+    }
+
+    console.log(`Initiated batched play for ${validActions.length} context(s) in room ${this.roomId}`);
+  }
+
+  /**
+   * Flush the in-flight batch: compute one shared serverTimeToExecute and emit
+   * a SCHEDULED_ACTION per context with that timestamp. Called when either the
+   * last context's load gate closes or the batch timeout fires.
+   */
+  private flushBatch(server: BunServer): void {
+    if (!this.pendingBatch) return;
+    const { playActions } = this.pendingBatch;
+    // Clear any sentinel timeouts that haven't fired yet.
+    for (const ctxId of playActions.keys()) {
+      this.clearAudioLoadingState(ctxId);
+    }
+    this.clearPendingBatch();
+    this.flushBatchActions(Array.from(playActions.values()), server);
+  }
+
+  /**
+   * Emit N SCHEDULED_ACTION broadcasts sharing one serverTimeToExecute. The
+   * caller is responsible for ensuring `pendingBatch` is cleared before this
+   * runs (or that it never existed — see the zero-clients fast path).
+   */
+  private flushBatchActions(playActions: PlayActionType[], server: BunServer): void {
+    if (playActions.length === 0) return;
+    const serverTimeToExecute = this.getScheduledExecutionTime();
+    let scheduled = 0;
+    for (const pa of playActions) {
+      const success = this.updatePlaybackSchedulePlay(pa, serverTimeToExecute);
+      if (!success) {
+        console.warn(`Batched play: failed to schedule ${pa.audioSource} on ctx=${pa.contextId ?? MAIN_CONTEXT_ID}`);
+        continue;
+      }
+      sendBroadcast({
+        server,
+        roomId: this.roomId,
+        message: {
+          type: "SCHEDULED_ACTION",
+          scheduledAction: pa,
+          serverTimeToExecute,
+        },
+      });
+      scheduled++;
+    }
+    console.log(`Batched play scheduled ${scheduled}/${playActions.length} context(s) at t=${serverTimeToExecute}`);
+  }
+
+  private clearPendingBatch(): void {
+    if (!this.pendingBatch) return;
+    clearTimeout(this.pendingBatch.timeout);
+    this.pendingBatch = undefined;
+  }
+
+  /**
+   * Skip the load-coordination handshake and emit one SCHEDULED_ACTION per
+   * context with a shared serverTimeToExecute. Used in demo mode (audio is
+   * pre-cached on clients) and any future path where caller can guarantee
+   * loaded state. Clears any in-flight batch + per-context pending plays first.
+   */
+  broadcastBatchedPlayImmediate(playActions: PlayActionType[], server: BunServer): void {
+    this.clearPendingBatch();
+    for (const pa of playActions) {
+      this.clearAudioLoadingState(pa.contextId);
+    }
+    this.flushBatchActions(playActions, server);
+  }
+
+  /**
+   * Pause every supplied context with one shared serverTimeToExecute. No load
+   * handshake required — pause is fire-and-forget once the audio is already
+   * scheduled.
+   */
+  broadcastPauseAll(pauseActions: PauseActionType[], server: BunServer): void {
+    if (pauseActions.length === 0) return;
+    const serverTimeToExecute = this.getScheduledExecutionTime();
+    let scheduled = 0;
+    for (const pa of pauseActions) {
+      const success = this.updatePlaybackSchedulePause(pa, serverTimeToExecute);
+      if (!success) continue;
+      sendBroadcast({
+        server,
+        roomId: this.roomId,
+        message: {
+          type: "SCHEDULED_ACTION",
+          scheduledAction: pa,
+          serverTimeToExecute,
+        },
+      });
+      scheduled++;
+    }
+    console.log(`Batched pause scheduled ${scheduled}/${pauseActions.length} context(s) at t=${serverTimeToExecute}`);
   }
 
   getAudioSources(): AudioSourceType[] {
