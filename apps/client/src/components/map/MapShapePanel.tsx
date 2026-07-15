@@ -140,6 +140,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
     .filter((p) => p.id !== shape.id && shapes.has(p.id) && p.playbackState.type === "playing")
     .map((p) => ({
       contextId: p.id,
+      label: zoneDisplayName(shapes.get(p.id) ?? { id: p.id }),
       beatgrid: p.tracks.find((t) => t.url === p.playbackState.audioSource)?.beatgrid,
     }));
 
@@ -300,8 +301,8 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
                   disabled={!isConnected || !c.beatgrid}
                   title={
                     c.beatgrid
-                      ? `Beat-match this zone to ${c.contextId.slice(0, 6)} (${c.beatgrid.bpm} BPM)`
-                      : `Zone ${c.contextId.slice(0, 6)}'s playing track has no beatgrid`
+                      ? `Beat-match this zone to ${c.label} (${c.beatgrid.bpm} BPM)`
+                      : `${c.label}'s playing track has no beatgrid`
                   }
                   onClick={() =>
                     send({
@@ -311,7 +312,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
                     })
                   }
                 >
-                  Sync to {c.contextId.slice(0, 6)}
+                  Sync to {c.label}
                   {c.beatgrid ? ` · ${c.beatgrid.bpm}` : ""}
                 </Button>
               ))}
