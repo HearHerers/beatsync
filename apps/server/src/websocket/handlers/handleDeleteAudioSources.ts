@@ -1,5 +1,5 @@
 import { IS_DEMO_MODE } from "@/demo";
-import { deleteObject, extractKeyFromUrl } from "@/lib/r2";
+import { deleteObject, keyFromPublicUrl } from "@/lib/r2";
 import type { RoomManager } from "@/managers/RoomManager";
 import { sendBroadcast } from "@/utils/responses";
 import { requireCanMutate } from "@/websocket/middlewares";
@@ -79,9 +79,12 @@ export const handleDeleteAudioSources: HandlerFunction<ExtractWSRequestFrom["DEL
       return;
     }
 
-    // Otherwise we need to actually delete the file from R2
+    // Otherwise we need to actually delete the file from R2. Key derivation
+    // must be bucket-aware (keyFromPublicUrl, not the raw URL pathname):
+    // path-style PUBLIC_URLs fold the bucket into the path, and DeleteObject
+    // on a wrong key "succeeds" silently, orphaning the object.
     try {
-      const key = extractKeyFromUrl(url);
+      const key = keyFromPublicUrl(url);
 
       if (!key) {
         throw new Error(`Failed to extract key from URL: ${url}`);
