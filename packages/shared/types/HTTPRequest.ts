@@ -20,14 +20,26 @@ export const GetUploadUrlSchema = z.object({
       (type) => type.startsWith("audio/") || type === "video/webm",
       "Content type must be an audio mime type or video/webm"
     ),
+  // Optional size hint. When present, the server checks whether the room
+  // already has a track with the same display name AND byte size, and answers
+  // with the duplicate variant below instead of a presigned URL — the caller
+  // then references the existing object rather than storing a second copy.
+  fileSizeBytes: z.number().int().positive().optional(),
 });
 export type GetUploadUrlType = z.infer<typeof GetUploadUrlSchema>;
 
-// R2 Upload URL Response - simplified to only essential fields
-export const UploadUrlResponseSchema = z.object({
-  uploadUrl: z.string().url(),
-  publicUrl: z.string().url(),
-});
+// R2 Upload URL Response: either a presigned upload, or — when the same file
+// (display name + byte size) already lives in the room — the existing track's
+// URL, meaning nothing should be uploaded.
+export const UploadUrlResponseSchema = z.union([
+  z.object({
+    uploadUrl: z.string().url(),
+    publicUrl: z.string().url(),
+  }),
+  z.object({
+    existingUrl: z.string().url(),
+  }),
+]);
 export type UploadUrlResponseType = z.infer<typeof UploadUrlResponseSchema>;
 
 // Upload Complete Request - simplified to only essential fields

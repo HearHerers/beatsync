@@ -37,11 +37,15 @@ export const AudioUploaderMinimal = ({ contextId, label }: AudioUploaderMinimalP
       setIsUploading(true);
 
       // Upload the file to the server as binary
-      await uploadAudioFile({
+      const result = await uploadAudioFile({
         file,
         roomId,
         contextId,
       });
+
+      if (result.deduped) {
+        toast.info("Already in this room — linked the existing file.");
+      }
 
       setTimeout(() => setFileName(null), 3000);
     } catch (err) {
