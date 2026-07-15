@@ -469,12 +469,13 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
         }
         group.addLayer(layer);
         shapeLayersRef.current.set(shape.id, layer);
-        // Click on a shape selects it for the playlist panel. Capture by id;
-        // the store call is read fresh so this doesn't go stale when the
-        // selection changes.
+        // Click on a shape selects it for the playlist panel; clicking the
+        // already-selected shape deselects. Capture by id; the store call is
+        // read fresh so this doesn't go stale when the selection changes.
         layer.on("click", (e) => {
           L.DomEvent.stopPropagation(e);
-          useMapStore.getState().setSelectedShapeId(shape.id);
+          const map = useMapStore.getState();
+          map.setSelectedShapeId(map.selectedShapeId === shape.id ? null : shape.id);
         });
       } else if (layer instanceof L.Circle && wantsCircle) {
         const { center, radius } = coords as { center: [number, number]; radius: number };
