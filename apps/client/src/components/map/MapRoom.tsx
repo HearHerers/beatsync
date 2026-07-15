@@ -30,7 +30,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { SyncProgress } from "@/components/ui/SyncProgress";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import { audioContextManager } from "@/lib/audioContextManager";
-import { proximityGainForShape } from "@/lib/geo";
+import { distanceToShapeEdgeMeters, proximityGainForShape } from "@/lib/geo";
 import { mapAudio } from "@/lib/mapAudio";
 import { cn } from "@/lib/utils";
 import { useGlobalStore } from "@/store/global";
@@ -152,6 +152,10 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
   const ownPosition = useMapStore((s) => s.ownPosition);
   const setOwnPosition = useMapStore((s) => s.setOwnPosition);
   const shapes = useMapStore((s) => s.shapes);
+  // Subscribed so the range-cull effect re-runs when the server's per-shape
+  // playback state changes (e.g. someone hits play in another zone while
+  // we're standing still).
+  const playlists = useGlobalStore((s) => s.playlists);
 
   const {
     latitude,
@@ -185,6 +189,12 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
   }, [locationMode, latitude, longitude, setOwnPosition]);
 
   // Compute + apply proximity gains whenever own position or shape geometry changes.
+  // Also range-culls local playback: when the listener is far enough past a
+  // zone's edge that they can't hear it anyway, we tear down the source node
+  // instead of leaving it running at gain 0 (saves CPU + memory, especially
+  // important when many zones are configured). When the listener re-enters
+  // the audible range, we re-fire mapAudio.playShape using the server's
+  // per-shape playbackState so timing stays in sync without a server roundtrip.
   useEffect(() => {
     if (!ownPosition) return;
     const nextGains = new Map<string, number>();
@@ -192,9 +202,30 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
       const gain = proximityGainForShape(ownPosition, shape);
       nextGains.set(shape.id, gain);
       mapAudio.setProximityGain(shape.id, gain);
+
+      // Range cull: 3× past the falloff = fully out of earshot. Pause locally
+      // (server stays "playing" for everyone else). Inside this threshold, if
+      // the server says we should be playing and we're not, resume.
+      const distance = distanceToShapeEdgeMeters(ownPosition, shape);
+      const cullDistance = Math.max(shape.falloffMeters * 3, 50);
+      const inRange = distance <= cullDistance;
+      const serverPlayback = playlists.get(shape.id)?.playbackState;
+      const serverIsPlaying = serverPlayback?.type === "playing" && !!serverPlayback.audioSource;
+      const locallyPlaying = mapAudio.isShapePlaying(shape.id);
+
+      if (!inRange && locallyPlaying) {
+        mapAudio.pauseShape(shape.id);
+      } else if (inRange && serverIsPlaying && !locallyPlaying && serverPlayback) {
+        mapAudio.playShape(
+          shape.id,
+          serverPlayback.audioSource,
+          serverPlayback.trackPositionSeconds,
+          serverPlayback.serverTimeToExecute
+        );
+      }
     }
     useMapStore.getState().setProximityGains(nextGains);
-  }, [ownPosition, shapes]);
+  }, [ownPosition, shapes, playlists]);
 
   // Tear down audio chains for shapes that have been deleted. Without this,
   // mapAudio's chain map keeps the AudioBufferSourceNode running even after
