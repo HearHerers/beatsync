@@ -1,12 +1,12 @@
 "use client";
-// Per-shape playlist column for the map dashboard. Sits next to the map in the
-// center area and renders the SAME Queue/Uploader components audio rooms use,
-// scoped to the currently-selected shape's playlist context (contextId = shape.id).
-//
-// What lives here:
-//   - Header with shape title, loop toggle, delete-shape button
-//   - AudioUploaderMinimal pinned ABOVE the queue (contextId-scoped upload)
-//   - Queue, parameterized by contextId == shape.id
+// Playlist column for the map dashboard, next to the map in the center area.
+// Two tabs:
+//   - "Zone": the selected shape's playlist — the SAME Queue/Uploader
+//     components audio rooms use, scoped to contextId == shape.id. Header with
+//     shape title, loop toggle, deselect and delete-shape buttons.
+//   - "Room pool": the room-wide main-context playlist (what room uploads and
+//     the server-side bulk import fill) — upload to it, and add its tracks to
+//     the selected zone (RoomPoolList).
 //
 // What does NOT live here:
 //   - Map rendering — MapCanvas
@@ -17,15 +17,17 @@ import { AudioUploaderMinimal } from "@/components/AudioUploaderMinimal";
 import { Queue } from "@/components/Queue";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { exportPlaylistToFile, parsePlaylistFile } from "@/lib/playlistFile";
 import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { useRoomStore } from "@/store/room";
 import { sendWSRequest } from "@/utils/ws";
 import { ClientActionEnum, MAP_CONSTANTS, zoneDisplayName } from "@beatsync/shared";
-import { Download, Repeat, Trash2, Upload } from "lucide-react";
+import { Download, Repeat, Trash2, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
+import { RoomPoolList } from "./RoomPoolList";
 
 interface MapShapePanelProps {
   canMutate: boolean;
@@ -57,17 +59,6 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
     setFalloffDraft(shape?.falloffMeters ?? MAP_CONSTANTS.DEFAULT_FALLOFF_METERS);
   }
 
-  if (!shape) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-xs text-neutral-500">
-        <div>Select a zone on the map to edit its playlist.</div>
-        {shapes.size === 0 && canMutate && (
-          <div className="text-neutral-600">Draw one with the toolbar in the top-left of the map.</div>
-        )}
-      </div>
-    );
-  }
-
   const send = (req: Parameters<typeof sendWSRequest>[0]["request"]) => {
     const socket = useGlobalStore.getState().socket;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
@@ -75,6 +66,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
   };
 
   const handleExport = () => {
+    if (!shape) return;
     if (!playlist || playlist.tracks.length === 0) {
       toast.error("This zone has no tracks to export.");
       return;
@@ -83,6 +75,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
   };
 
   const handleImportFile = async (file: File) => {
+    if (!shape) return;
     try {
       const doc = await parsePlaylistFile(file);
       const urls = doc.tracks.map((t) => t.url);
@@ -98,120 +91,176 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2 border-b border-neutral-800/50 px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <ShapeNameEditor shape={shape} canMutate={canMutate} send={send} />
-          <div className="text-[11px] text-neutral-500">{shape.type}</div>
-        </div>
-        {canMutate && (
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className={`h-7 px-1.5 ${playlist?.loop ? "text-green-400" : "text-neutral-500"}`}
-              title={playlist?.loop ? "Looping zone" : "Not looping"}
-              disabled={!isConnected}
-              onClick={() =>
-                send({
-                  type: ClientActionEnum.enum.SET_CONTEXT_LOOP,
-                  contextId: shape.id,
-                  loop: !playlist?.loop,
-                })
-              }
-            >
-              <Repeat className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7 px-1.5 text-neutral-500 hover:text-neutral-200"
-              title="Export this zone's playlist"
-              disabled={!playlist || playlist.tracks.length === 0}
-              onClick={handleExport}
-            >
-              <Download className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7 px-1.5 text-neutral-500 hover:text-neutral-200"
-              title="Import a playlist into this zone"
-              disabled={!isConnected}
-              onClick={() => importInputRef.current?.click()}
-            >
-              <Upload className="size-3.5" />
-            </Button>
-            <input
-              ref={importInputRef}
-              type="file"
-              accept="application/json,.json"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = ""; // allow re-importing the same file
-                if (file) void handleImportFile(file);
-              }}
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7 px-1.5 text-neutral-500 hover:text-red-400"
-              title="Delete zone"
-              disabled={!isConnected}
-              onClick={() => send({ type: ClientActionEnum.enum.DELETE_SHAPE, shapeId: shape.id })}
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
+    <Tabs defaultValue="zone" className="flex h-full flex-col gap-0 overflow-hidden">
+      <div className="border-b border-neutral-800/50 px-3 py-2">
+        <TabsList className="h-8 w-full">
+          <TabsTrigger value="zone" className="text-xs">
+            Zone
+          </TabsTrigger>
+          <TabsTrigger value="pool" className="text-xs">
+            Room pool
+          </TabsTrigger>
+        </TabsList>
+      </div>
+
+      <TabsContent value="zone" className="flex min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+        {shape ? (
+          <ZoneTab />
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-xs text-neutral-500">
+            <div>Select a zone on the map to edit its playlist.</div>
+            {shapes.size === 0 && canMutate && (
+              <div className="text-neutral-600">Draw one with the toolbar in the top-left of the map.</div>
+            )}
           </div>
         )}
-      </div>
+      </TabsContent>
 
-      {/* Edge-falloff slider — gain stays 1.0 inside the zone and fades to 0
-          across this distance past the boundary. */}
-      <div className="border-b border-neutral-800/50 px-4 py-2.5">
-        <div className="mb-1 flex items-center justify-between text-[11px]">
-          <span className="text-neutral-400">Edge falloff</span>
-          <span className="font-mono text-neutral-300">{falloffDraft}m</span>
+      <TabsContent value="pool" className="flex min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+        {canMutate && (
+          <div className="px-3 pt-3">
+            <AudioUploaderMinimal label="Upload to room pool" />
+          </div>
+        )}
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-3 scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-muted-foreground/10 scrollbar-track-transparent hover:scrollbar-thumb-muted-foreground/20">
+          <RoomPoolList canMutate={canMutate} />
         </div>
-        <Slider
-          value={[falloffDraft]}
-          min={MAP_CONSTANTS.MIN_FALLOFF_METERS}
-          max={Math.max(200, MAP_CONSTANTS.MIN_FALLOFF_METERS + 1)}
-          step={1}
-          disabled={!canMutate || !isConnected}
-          onValueChange={(v) => setFalloffDraft(v[0])}
-          onValueCommit={(v) =>
-            send({
-              type: ClientActionEnum.enum.SET_SHAPE_FALLOFF,
-              shapeId: shape.id,
-              falloffMeters: v[0],
-            })
-          }
-        />
-        <div className="mt-1 text-[10px] text-neutral-500">
-          Inside the zone: full volume. Outside: fades over {falloffDraft}m.
-        </div>
-      </div>
-
-      {/* Uploader pinned above the queue */}
-      {canMutate && (
-        <div className="px-3 pt-3">
-          <AudioUploaderMinimal contextId={shape.id} label={`Upload to ${zoneDisplayName(shape)}`} />
-        </div>
-      )}
-
-      {/* Queue (scrollable) */}
-      <div className="flex-1 overflow-y-auto px-3 pb-4 pt-3 scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-muted-foreground/10 scrollbar-track-transparent hover:scrollbar-thumb-muted-foreground/20">
-        <Queue contextId={shape.id} />
-      </div>
-    </div>
+      </TabsContent>
+    </Tabs>
   );
+
+  // The zone playlist view — only rendered with a shape selected. A nested
+  // component (not early returns) so the Tabs skeleton always mounts and the
+  // pool tab stays reachable with nothing selected.
+  function ZoneTab() {
+    if (!shape) return null;
+    return (
+      <div className="flex h-full flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-2 border-b border-neutral-800/50 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <ShapeNameEditor shape={shape} canMutate={canMutate} send={send} />
+            <div className="text-[11px] text-neutral-500">{shape.type}</div>
+          </div>
+          {canMutate && (
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className={`h-7 px-1.5 ${playlist?.loop ? "text-green-400" : "text-neutral-500"}`}
+                title={playlist?.loop ? "Looping zone" : "Not looping"}
+                disabled={!isConnected}
+                onClick={() =>
+                  send({
+                    type: ClientActionEnum.enum.SET_CONTEXT_LOOP,
+                    contextId: shape.id,
+                    loop: !playlist?.loop,
+                  })
+                }
+              >
+                <Repeat className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-1.5 text-neutral-500 hover:text-neutral-200"
+                title="Export this zone's playlist"
+                disabled={!playlist || playlist.tracks.length === 0}
+                onClick={handleExport}
+              >
+                <Download className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-1.5 text-neutral-500 hover:text-neutral-200"
+                title="Import a playlist into this zone"
+                disabled={!isConnected}
+                onClick={() => importInputRef.current?.click()}
+              >
+                <Upload className="size-3.5" />
+              </Button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = ""; // allow re-importing the same file
+                  if (file) void handleImportFile(file);
+                }}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-1.5 text-neutral-500 hover:text-red-400"
+                title="Delete zone"
+                disabled={!isConnected}
+                onClick={() => send({ type: ClientActionEnum.enum.DELETE_SHAPE, shapeId: shape.id })}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+          )}
+          {/* Deselect is a view action, so it's available to everyone. */}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 px-1.5 text-neutral-500 hover:text-neutral-200"
+            title="Deselect zone"
+            onClick={() => useMapStore.getState().setSelectedShapeId(null)}
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+
+        {/* Edge-falloff slider — gain stays 1.0 inside the zone and fades to 0
+          across this distance past the boundary. */}
+        <div className="border-b border-neutral-800/50 px-4 py-2.5">
+          <div className="mb-1 flex items-center justify-between text-[11px]">
+            <span className="text-neutral-400">Edge falloff</span>
+            <span className="font-mono text-neutral-300">{falloffDraft}m</span>
+          </div>
+          <Slider
+            value={[falloffDraft]}
+            min={MAP_CONSTANTS.MIN_FALLOFF_METERS}
+            max={Math.max(200, MAP_CONSTANTS.MIN_FALLOFF_METERS + 1)}
+            step={1}
+            disabled={!canMutate || !isConnected}
+            onValueChange={(v) => setFalloffDraft(v[0])}
+            onValueCommit={(v) =>
+              send({
+                type: ClientActionEnum.enum.SET_SHAPE_FALLOFF,
+                shapeId: shape.id,
+                falloffMeters: v[0],
+              })
+            }
+          />
+          <div className="mt-1 text-[10px] text-neutral-500">
+            Inside the zone: full volume. Outside: fades over {falloffDraft}m.
+          </div>
+        </div>
+
+        {/* Uploader pinned above the queue */}
+        {canMutate && (
+          <div className="px-3 pt-3">
+            <AudioUploaderMinimal contextId={shape.id} label={`Upload to ${zoneDisplayName(shape)}`} />
+          </div>
+        )}
+
+        {/* Queue (scrollable) */}
+        <div className="flex-1 overflow-y-auto px-3 pb-4 pt-3 scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-muted-foreground/10 scrollbar-track-transparent hover:scrollbar-thumb-muted-foreground/20">
+          <Queue contextId={shape.id} />
+        </div>
+      </div>
+    );
+  }
 };
 
 /**
