@@ -48,22 +48,34 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function getPresignedUrl(roomId: string, fileName: string, contentType: string): Promise<UploadUrlResponseType> {
-  const body: GetUploadUrlType = { roomId, fileName, contentType };
+async function getPresignedUrl(
+  roomId: string,
+  fileName: string,
+  contentType: string,
+  fileSizeBytes?: number
+): Promise<UploadUrlResponseType> {
+  const body: GetUploadUrlType = { roomId, fileName, contentType, fileSizeBytes };
   return postJSON<UploadUrlResponseType>("/upload/get-presigned-url", body);
 }
 
 // Steps 1 + 2 for one file: presign, then PUT the bytes straight to storage.
-// Returns the public URL to register in step 3.
+// Returns the public URL to register in step 3. Sending the file size lets the
+// server dedupe: when the same file (display name + byte size) is already in
+// the room, it answers { existingUrl } and we skip the PUT entirely — re-running
+// an import of the same directory stores nothing twice.
 async function uploadFileBytes(roomId: string, filePath: string): Promise<string> {
   const fileName = basename(filePath);
   const contentType = contentTypeForFile(fileName)!; // collectAudioFiles only returns supported files
-  const { uploadUrl, publicUrl } = await getPresignedUrl(roomId, fileName, contentType);
+  const presigned = await getPresignedUrl(roomId, fileName, contentType, Bun.file(filePath).size);
+
+  if ("existingUrl" in presigned) {
+    return presigned.existingUrl; // duplicate — reference the existing object
+  }
 
   // Content-Type must match the presigned PutObjectCommand or the signature
   // check fails; likewise the body must be fixed-length bytes — a streamed
   // (chunked) body has no Content-Length and MinIO rejects the signature (403).
-  const res = await fetch(uploadUrl, {
+  const res = await fetch(presigned.uploadUrl, {
     method: "PUT",
     headers: { "content-type": contentType },
     body: await Bun.file(filePath).arrayBuffer(),
@@ -71,7 +83,7 @@ async function uploadFileBytes(roomId: string, filePath: string): Promise<string
   if (!res.ok) {
     throw new Error(`storage PUT returned ${res.status} ${res.statusText}`);
   }
-  return publicUrl;
+  return presigned.publicUrl;
 }
 
 interface CliArgs {

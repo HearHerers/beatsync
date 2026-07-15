@@ -154,6 +154,23 @@ export async function validateAudioFileExists(audioUrl: string): Promise<boolean
 }
 
 /**
+ * Byte size of an object, or null if it doesn't exist / HEAD fails.
+ */
+export async function getObjectSize(key: string): Promise<number | null> {
+  try {
+    const response = await r2Client.send(
+      new HeadObjectCommand({
+        Bucket: S3_CONFIG.BUCKET_NAME,
+        Key: key,
+      })
+    );
+    return response.ContentLength ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Generate a unique file name for audio uploads
  */
 export function generateAudioFileName(originalName: string): string {
