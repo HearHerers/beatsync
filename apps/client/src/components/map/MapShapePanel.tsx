@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { matchBeatgridsToTracks, parseBeatgridFile } from "@/lib/beatgridFile";
 import { exportPlaylistToFile, parsePlaylistFile } from "@/lib/playlistFile";
+import { extractFileNameFromUrl } from "@/lib/utils";
 import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { useRoomStore } from "@/store/room";
@@ -30,6 +31,16 @@ import { toast } from "sonner";
 
 interface MapShapePanelProps {
   canMutate: boolean;
+}
+
+// extractFileNameFromUrl throws on URLs with no path segment; a sync tooltip
+// isn't worth crashing the panel over, so fall back to omitting the title.
+function safeTrackTitle(url: string): string | undefined {
+  try {
+    return extractFileNameFromUrl(url);
+  } catch {
+    return undefined;
+  }
 }
 
 export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
@@ -137,11 +148,15 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
   const isZonePlaying = playlist?.playbackState.type === "playing";
   const syncCandidates = Array.from(playlists.values())
     .filter((p) => p.id !== shape.id && shapes.has(p.id) && p.playbackState.type === "playing")
-    .map((p) => ({
-      contextId: p.id,
-      label: zoneDisplayName(shapes.get(p.id) ?? { id: p.id }),
-      beatgrid: p.tracks.find((t) => t.url === p.playbackState.audioSource)?.beatgrid,
-    }));
+    .map((p) => {
+      const playing = p.tracks.find((t) => t.url === p.playbackState.audioSource);
+      return {
+        contextId: p.id,
+        label: zoneDisplayName(shapes.get(p.id) ?? { id: p.id }),
+        beatgrid: playing?.beatgrid,
+        trackTitle: playing ? safeTrackTitle(playing.url) : undefined,
+      };
+    });
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -300,7 +315,8 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
                   disabled={!isConnected || !c.beatgrid}
                   title={
                     c.beatgrid
-                      ? `Beat-match this zone to ${c.label} (${c.beatgrid.bpm} BPM)`
+                      ? `Beat-match this zone to ${c.label} (${c.beatgrid.bpm} BPM)` +
+                        (c.trackTitle ? ` — playing: ${c.trackTitle}` : "")
                       : `${c.label}'s playing track has no beatgrid`
                   }
                   onClick={() =>
