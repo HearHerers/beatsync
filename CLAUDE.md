@@ -22,25 +22,7 @@ bun build                # Build all packages
 # Server-specific (run from apps/server/)
 bun test                 # Run tests (Bun test runner)
 bun test --watch         # Watch mode
-bun run rooms:list       # List persisted rooms from the latest R2 backup (offline)
-bun run room:info <id>   # Room detail: zones, playlists, clients (offline)
-# Both accept --sync: asks the running server (POST /admin/backup, needs
-# OPERATOR_SECRET) to write a fresh backup first instead of reading up-to-60s-stale data.
-bun run room:archive <id>    # Soft delete: evict + hide + reject joins; reversible
-bun run room:unarchive <id>  # Reverse an archive
-bun run room:delete <id> --yes  # HARD delete: purge state + R2 audio, tombstoned
-bun run rooms:purge --yes    # HARD delete EVERY room + all audio (incl. orphans)
-bun run room:import <roomId> <dir>  # Bulk-import local audio files into a room via the running server (--context <shapeId> for a zone, --dry-run to preview)
-# The mutations call the running server's /admin API (OPERATOR_SECRET bearer).
-# On hosts where nested `bun` isn't on the package-script shell's PATH (e.g. the
-# deploy server), invoke the script files directly instead of the `bun run` aliases:
-#   bun scripts/rooms-list.ts [--sync] [--show-tokens]
-#   bun scripts/room-info.ts <id> [--sync]
-#   bun scripts/room-manage.ts archive|unarchive <id>
-#   bun scripts/room-manage.ts delete <id> --yes
-#   bun scripts/room-manage.ts purge [--yes]
-#   bun scripts/room-admin-token.ts <id>
-
+bun run room:import <roomId> <dir>  # Bulk-import local audio files into a room via the running server (--context <shapeId> for a zone, --dry-run to preview. For <shapeId> use zone id via bun scripts/room-info.ts eg. c15fa3e5-527e-40c3-ba84-f5de0ab22e5f)
 bun run type-check       # tsc --noEmit
 
 # Client-specific (run from apps/client/)
