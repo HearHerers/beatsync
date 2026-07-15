@@ -442,10 +442,18 @@ function knownShapeIds(): string[] {
   return Array.from(chains.keys());
 }
 
+/** True if we're locally playing this shape (source node is alive). The
+ *  server may say a shape is "playing" while we're locally paused (because
+ *  we're far away and the listener is range-culling). */
+function isShapePlaying(shapeId: string): boolean {
+  return !!chains.get(shapeId)?.sourceNode;
+}
+
 export const mapAudio = {
   loadAudioForShape,
   playShape,
   pauseShape,
+  isShapePlaying,
   setProximityGain,
   unloadShape,
   knownShapeIds,
