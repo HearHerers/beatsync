@@ -203,7 +203,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
       {/* Uploader pinned above the queue */}
       {canMutate && (
         <div className="px-3 pt-3">
-          <AudioUploaderMinimal contextId={shape.id} label={`Upload to ${shape.id.slice(0, 6)}`} />
+          <AudioUploaderMinimal contextId={shape.id} label={`Upload to ${zoneDisplayName(shape)}`} />
         </div>
       )}
 
