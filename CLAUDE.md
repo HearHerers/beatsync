@@ -24,7 +24,7 @@ bun test                 # Run tests (Bun test runner)
 bun test --watch         # Watch mode
 bun run cleanup          # Dry-run orphaned R2 room cleanup
 bun run cleanup:live     # Delete orphaned R2 rooms
-bun run room:import <roomId> <dir>  # Bulk-import local audio files into a room via the running server (--context <shapeId> for a zone, --dry-run to preview)
+bun run room:import <roomId> <dir>  # Bulk-import local audio files into a room via the running server (--context <shapeId> for a zone, --dry-run to preview. For <shapeId> use zone id via bun scripts/room-info.ts eg. c15fa3e5-527e-40c3-ba84-f5de0ab22e5f)
 bun run type-check       # tsc --noEmit
 
 # Client-specific (run from apps/client/)
