@@ -30,7 +30,7 @@ bun run room:archive <id>    # Soft delete: evict + hide + reject joins; reversi
 bun run room:unarchive <id>  # Reverse an archive
 bun run room:delete <id> --yes  # HARD delete: purge state + R2 audio, tombstoned
 bun run rooms:purge --yes    # HARD delete EVERY room + all audio (incl. orphans)
-bun run room:import <roomId> <dir>  # Bulk-import local audio files into a room via the running server (--context <shapeId> for a zone, --dry-run to preview)
+bun run room:import <roomId> <dir>  # Bulk-import local audio files into a room via the running server (--context <shapeId> for a zone, --dry-run to preview). For <shapeId> use a zone id from `bun run room:info <roomId>`.
 # The mutations call the running server's /admin API (OPERATOR_SECRET bearer).
 # On hosts where nested `bun` isn't on the package-script shell's PATH (e.g. the
 # deploy server), invoke the script files directly instead of the `bun run` aliases:
