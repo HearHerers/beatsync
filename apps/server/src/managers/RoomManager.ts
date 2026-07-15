@@ -1432,6 +1432,15 @@ export class RoomManager {
     return Array.from(this.playlists.keys());
   }
 
+  /** Every distinct track URL across all contexts (pool and zones). */
+  getAllTrackUrls(): string[] {
+    const urls = new Set<string>();
+    for (const playlist of this.playlists.values()) {
+      for (const track of playlist.tracks) urls.add(track.url);
+    }
+    return Array.from(urls);
+  }
+
   /**
    * Return all playlists in wire format for broadcasting to clients. Used by
    * the initial-state burst on connect, and any time the playlist set changes.
