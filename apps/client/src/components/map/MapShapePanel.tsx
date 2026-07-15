@@ -325,7 +325,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
       {canMutate && (
         <div className="flex flex-col gap-2 px-3 pt-3">
           <InlineSearch contextId={shape.id} />
-          <AudioUploaderMinimal contextId={shape.id} label={`Upload to ${shape.id.slice(0, 6)}`} />
+          <AudioUploaderMinimal contextId={shape.id} label={`Upload to ${zoneDisplayName(shape)}`} />
         </div>
       )}
 
