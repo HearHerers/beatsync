@@ -289,7 +289,7 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
                 : "bg-neutral-800/50 text-neutral-500 placeholder:text-neutral-600 cursor-not-allowed"
             )}
           />
-          <div className="absolute right-1 top-1/2 transform -translate-y-1/2 pointer-events-none w-12 flex items-center justify-center">
+          <div className="absolute right-2 top-1/2 transform -translate-y-1/2 pointer-events-none flex items-center justify-end">
             <AnimatePresence mode="wait">
               {showCheckmark ? (
                 <motion.div
