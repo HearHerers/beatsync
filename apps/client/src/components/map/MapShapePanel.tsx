@@ -27,6 +27,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { exportPlaylistToFile, parsePlaylistFile } from "@/lib/playlistFile";
+import { buildRoomExport, downloadRoomFile, parseRoomFile, type RoomPlaylistExport } from "@/lib/roomFile";
 import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { useRoomStore } from "@/store/room";
@@ -50,6 +51,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
   const pool = useGlobalStore((s) => s.playlists.get(MAIN_CONTEXT_ID));
   const importInputRef = useRef<HTMLInputElement>(null);
   const poolImportInputRef = useRef<HTMLInputElement>(null);
+  const roomImportInputRef = useRef<HTMLInputElement>(null);
   const [poolClearOpen, setPoolClearOpen] = useState(false);
 
   const shape = selectedShapeId ? shapes.get(selectedShapeId) : undefined;
@@ -124,6 +126,75 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
     }
   };
 
+  // ── Whole-room export / import (#70) ──────────────────────────────
+  // Structure only (zones + playlists as URL refs + settings), no audio blobs —
+  // assumes re-import on the same server so the track URLs still resolve.
+  const handleRoomExport = () => {
+    const allShapes = Array.from(useMapStore.getState().shapes.values());
+    const playlists: RoomPlaylistExport[] = [];
+    useGlobalStore.getState().playlists.forEach((pl, id) => {
+      playlists.push({ contextId: id, loop: pl.loop, urls: pl.tracks.map((t) => t.url) });
+    });
+    const room = useRoomStore.getState();
+    const doc = buildRoomExport({
+      sourceRoomId: roomId,
+      roomName: room.roomName,
+      mapMetadata: room.mapMetadata,
+      defaultTileLayerId: room.defaultTileLayerId,
+      shapes: allShapes,
+      playlists,
+      now: Date.now(),
+    });
+    if (doc.shapes.length === 0 && doc.playlists.length === 0) {
+      toast.error("Nothing to export yet — add some zones or tracks first.");
+      return;
+    }
+    downloadRoomFile(doc, `room-${roomId}`);
+    toast.success("Room exported.");
+  };
+
+  const handleRoomImportFile = async (file: File) => {
+    try {
+      const doc = await parseRoomFile(file);
+      // Remap shape ids so importing into a room that already has zones can't
+      // collide (ADD_SHAPE rejects a duplicate id).
+      const idMap = new Map<string, string>();
+
+      if (doc.roomName) send({ type: ClientActionEnum.enum.SET_ROOM_NAME, roomName: doc.roomName });
+      if (doc.mapMetadata) send({ type: ClientActionEnum.enum.SET_MAP_METADATA, metadata: doc.mapMetadata });
+      if (doc.defaultTileLayerId)
+        send({ type: ClientActionEnum.enum.SET_DEFAULT_TILE_LAYER, tileLayerId: doc.defaultTileLayerId });
+
+      for (const shape of doc.shapes) {
+        const newId =
+          (typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID()) ||
+          `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+        idMap.set(shape.id, newId);
+        send({ type: ClientActionEnum.enum.ADD_SHAPE, shape: { ...shape, id: newId } });
+      }
+
+      let trackCount = 0;
+      for (const pl of doc.playlists) {
+        const target = pl.contextId === MAIN_CONTEXT_ID ? MAIN_CONTEXT_ID : idMap.get(pl.contextId);
+        if (!target) continue; // zone context with no matching shape in the file
+        if (pl.urls.length > 0) {
+          send({ type: ClientActionEnum.enum.IMPORT_TRACKS_TO_CONTEXT, contextId: target, urls: pl.urls });
+          trackCount += pl.urls.length;
+        }
+        if (target !== MAIN_CONTEXT_ID) {
+          send({ type: ClientActionEnum.enum.SET_CONTEXT_LOOP, contextId: target, loop: pl.loop });
+        }
+      }
+      toast.success(
+        `Imported ${doc.shapes.length} zone${doc.shapes.length === 1 ? "" : "s"} and ${trackCount} track${
+          trackCount === 1 ? "" : "s"
+        }.`
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not import that room file.");
+    }
+  };
+
   // Clear = delete every pool track. Because a pool track is one object
   // referenced from many zones, this removes them from the pool AND every zone
   // AND deletes the files — the whole room's audio. Confirmed via dialog.
@@ -163,6 +234,43 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
       </TabsContent>
 
       <TabsContent value="pool" className="flex min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+        {canMutate && (
+          <div className="flex items-center gap-2 border-b border-neutral-800/50 px-4 py-2">
+            <span className="min-w-0 flex-1 text-[11px] font-medium text-neutral-500">Entire room</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-[11px] text-neutral-400 hover:text-neutral-200"
+              title="Export the whole room (zones, playlists, settings) to a file"
+              onClick={handleRoomExport}
+            >
+              <Download className="mr-1 size-3" /> Export
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-[11px] text-neutral-400 hover:text-neutral-200"
+              title="Import a room file — adds its zones and playlists into this room"
+              disabled={!isConnected}
+              onClick={() => roomImportInputRef.current?.click()}
+            >
+              <Upload className="mr-1 size-3" /> Import
+            </Button>
+            <input
+              ref={roomImportInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) void handleRoomImportFile(file);
+              }}
+            />
+          </div>
+        )}
         {canMutate && (
           <div className="flex items-center justify-between gap-2 border-b border-neutral-800/50 px-4 py-3">
             <div className="min-w-0 flex-1 text-xs font-medium text-neutral-300">Room Pool</div>
