@@ -1,5 +1,6 @@
 "use client";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { emojiForId } from "@/lib/avatarEmoji";
 import { cn } from "@/lib/utils";
 import { useGlobalStore } from "@/store/global";
 import { useRoomStore } from "@/store/room";
@@ -9,7 +10,7 @@ import { TooltipPortal } from "@radix-ui/react-tooltip";
 import { Crown, MoreVertical, Pencil, User } from "lucide-react";
 import { motion } from "motion/react";
 import { memo, useState } from "react";
-import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
+import { Avatar, AvatarFallback } from "../ui/avatar";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
@@ -65,14 +66,11 @@ export const ConnectedUserItem = memo<ConnectedUserItemProps>(({ client, isCurre
   const avatarContent = (
     <div className="relative">
       <Avatar className="h-8 w-8">
-        <AvatarImage src={client.location?.flagSvgURL} className="object-cover w-full h-full" />
-        <AvatarFallback className={isCurrentUser ? "bg-primary-600" : "bg-neutral-600"}>
-          {client.username
-            .split("-")
-            .map((part) => part[0])
-            .join("")
-            .slice(0, 2)
-            .toUpperCase()}{" "}
+        <AvatarFallback
+          className={cn("text-base leading-none", isCurrentUser ? "bg-primary-600" : "bg-neutral-600")}
+          title={client.username}
+        >
+          {emojiForId(client.clientId)}
         </AvatarFallback>
       </Avatar>
       {/* Admin crown indicator */}
