@@ -186,11 +186,9 @@ class AudioContextManager {
     try {
       if ("wakeLock" in navigator) {
         this.wakeLock = await navigator.wakeLock.request("screen");
-        console.log("[AudioContextManager] Wake lock acquired");
 
         // Re-acquire on visibility change (lock is released when page is hidden)
         this.wakeLock.addEventListener("release", () => {
-          console.log("[AudioContextManager] Wake lock released");
           this.wakeLock = null;
         });
 
