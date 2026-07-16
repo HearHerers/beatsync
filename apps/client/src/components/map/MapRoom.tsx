@@ -32,6 +32,7 @@ import { useGeolocation } from "@/hooks/useGeolocation";
 import { audioContextManager } from "@/lib/audioContextManager";
 import { distanceToShapeEdgeMeters, proximityGainForShape } from "@/lib/geo";
 import { mapAudio } from "@/lib/mapAudio";
+import { hasSeenOnboarding } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
 import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
@@ -57,6 +58,7 @@ import { useDefaultLayout, useGroupRef, usePanelRef, type GroupImperativeHandle 
 import { EnsembleControls } from "./EnsembleControls";
 import { MapCanvas, useCanMutate } from "./MapCanvas";
 import { MapShapePanel } from "./MapShapePanel";
+import { OnboardingWizard } from "./OnboardingWizard";
 
 interface MapRoomProps {
   roomId: string;
@@ -337,6 +339,14 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
     </div>
   );
 
+  // First-visit onboarding wizard (#80). queueMicrotask defers the React state
+  // out of the effect body (avoids the set-state-in-effect lint); localStorage
+  // is client-only so this can only run after mount anyway.
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  useEffect(() => {
+    queueMicrotask(() => setShowOnboarding(!hasSeenOnboarding(roomId)));
+  }, [roomId]);
+
   const overlays = (
     <MapOverlays
       locationMode={locationMode}
@@ -353,6 +363,8 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
 
   return (
     <div className="flex h-dvh w-full flex-col bg-neutral-950 text-white">
+      {showOnboarding && <OnboardingWizard roomId={roomId} onDone={() => setShowOnboarding(false)} />}
+
       <TopBar roomId={roomId} panelControls={isReady ? panelControls : undefined} />
 
       {!isSynced && hasUserStartedSystem && !isLoadingAudio && <SyncProgress />}
