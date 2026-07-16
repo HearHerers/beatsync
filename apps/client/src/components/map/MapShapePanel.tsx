@@ -197,7 +197,11 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
           <ZoneTab />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-xs text-neutral-500">
-            <div>Select a zone on the map to edit its playlist.</div>
+            <div>
+              {canMutate
+                ? "Select a zone on the map to edit its playlist."
+                : "Select a zone on the map to see what's playing."}
+            </div>
             {shapes.size === 0 && canMutate && (
               <div className="text-neutral-600">Draw one with the toolbar in the top-left of the map.</div>
             )}

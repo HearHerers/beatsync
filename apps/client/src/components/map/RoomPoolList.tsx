@@ -179,7 +179,7 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
 
   return (
     <div className="flex flex-col gap-0.5">
-      {!shape && (
+      {!shape && canMutate && (
         <div className="px-1 pb-2 text-[11px] text-neutral-500">
           Select a zone on the map to add pool tracks to its playlist.
         </div>

@@ -77,7 +77,9 @@ export const EnsembleControls = () => {
     <div className="flex w-full items-center justify-end gap-3">
       <div className="text-xs text-neutral-400">
         {totalWithTracks === 0
-          ? "Draw a zone and add audio to start"
+          ? canMutate
+            ? "Draw a zone and add audio to start"
+            : "Nothing playing yet"
           : `${playingCount} of ${totalWithTracks} zone${totalWithTracks === 1 ? "" : "s"} playing`}
       </div>
       {canMutate && !anyPlaying && resumableCount > 0 && (
