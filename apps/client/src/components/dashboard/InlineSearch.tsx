@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { useCanMutate, useGlobalStore } from "@/store/global";
 import { sendWSRequest } from "@/utils/ws";
 import { ClientActionEnum } from "@beatsync/shared";
-import { ArrowDown, Search as SearchIcon, X, ZapIcon } from "lucide-react";
+import { ArrowDown, Search as SearchIcon, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import * as React from "react";
 import { useForm } from "react-hook-form";
@@ -15,18 +15,36 @@ interface SearchForm {
   query: string;
 }
 
-export function InlineSearch() {
+interface InlineSearchProps {
+  /** When set, streamed tracks are added to this playlist context (e.g. a
+   * shape.id in map rooms) rather than the room-wide "main" playlist. */
+  contextId?: string;
+}
+
+export function InlineSearch({ contextId }: InlineSearchProps = {}) {
   const [showResults, setShowResults] = React.useState(false);
   const [isFocused, setIsFocused] = React.useState(false);
   const [showCheckmark, setShowCheckmark] = React.useState(false);
+  // Platform-aware modifier label for the ⌘K/Ctrl+K shortcut. Detected after
+  // mount to avoid an SSR hydration mismatch (default to Ctrl, the common case).
+  const [isMac, setIsMac] = React.useState(false);
+  React.useEffect(() => {
+    setIsMac(/mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent));
+  }, []);
   const isMobile = useIsMobile();
   const blurTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Cap the results dropdown to the space below the input so its bottom never
+  // runs off-screen / under the bottom bar (a fixed vh max can, when the search
+  // box sits low in the column).
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [dropdownMaxH, setDropdownMaxH] = React.useState<number>();
   const canMutate = useCanMutate();
   const socket = useGlobalStore((state) => state.socket);
   const setIsSearching = useGlobalStore((state) => state.setIsSearching);
   const setSearchQuery = useGlobalStore((state) => state.setSearchQuery);
   const setSearchOffset = useGlobalStore((state) => state.setSearchOffset);
   const setHasMoreResults = useGlobalStore((state) => state.setHasMoreResults);
+  const clearSearchResults = useGlobalStore((state) => state.clearSearchResults);
   const searchResults = useGlobalStore((state) => state.searchResults);
   const isSearching = useGlobalStore((state) => state.isSearching);
   const activeStreamJobs = useGlobalStore((state) => state.activeStreamJobs);
@@ -82,42 +100,52 @@ export function InlineSearch() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [setFocus, isFocused, canMutate, showResults]);
 
-  // Dismiss search results when input becomes empty
+  // Cap the results dropdown to the space below the input (minus the bottom
+  // bar), recomputed when it opens and on resize, so it never runs off-screen.
   React.useEffect(() => {
-    if (!watchedQuery || watchedQuery.trim() === "") {
+    if (!showResults) return;
+    const compute = () => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const BOTTOM_GAP = 80; // clears the map bottom bar + a margin
+      setDropdownMaxH(Math.max(160, window.innerHeight - rect.bottom - BOTTOM_GAP));
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, [showResults]);
+
+  const runSearch = React.useCallback(
+    (raw: string) => {
+      if (!canMutate || !socket) return;
+      const query = raw.trim();
+      if (!query) return;
+      // New query: reset pagination, show loading + the results dropdown.
+      setSearchOffset(0);
+      setHasMoreResults(false);
+      setIsSearching(true);
+      setSearchQuery(query);
+      setShowResults(true);
+      sendWSRequest({ ws: socket, request: { type: ClientActionEnum.enum.SEARCH_MUSIC, query } });
+    },
+    [canMutate, socket, setSearchOffset, setHasMoreResults, setIsSearching, setSearchQuery]
+  );
+
+  // Search-as-you-type: debounce the live query. <2 chars clears the results.
+  React.useEffect(() => {
+    const q = watchedQuery?.trim() ?? "";
+    if (q.length < 2) {
       setShowResults(false);
-    }
-  }, [watchedQuery]);
-
-  const onSubmit = (data: SearchForm) => {
-    if (!canMutate) {
+      setSearchQuery("");
+      clearSearchResults();
       return;
     }
+    const timer = setTimeout(() => runSearch(q), 250);
+    return () => clearTimeout(timer);
+  }, [watchedQuery, runSearch, clearSearchResults, setSearchQuery]);
 
-    if (!socket) {
-      console.error("WebSocket not connected");
-      return;
-    }
-
-    if (!data.query || !data.query.trim()) return;
-
-    console.log("Sending search request", data.query);
-
-    // Reset pagination state for new search and set loading state
-    setSearchOffset(0);
-    setHasMoreResults(false);
-    setIsSearching(true);
-    setSearchQuery(data.query);
-    setShowResults(true);
-
-    sendWSRequest({
-      ws: socket,
-      request: {
-        type: ClientActionEnum.enum.SEARCH_MUSIC,
-        query: data.query,
-      },
-    });
-  };
+  // Enter runs the search immediately (skips the debounce wait).
+  const onSubmit = (data: SearchForm) => runSearch(data.query);
 
   const handleTrackSelection = () => {
     // Show checkmark animation
@@ -164,6 +192,7 @@ export function InlineSearch() {
 
   return (
     <div
+      ref={containerRef}
       className="relative w-full"
       onBlur={handleBlur}
       onFocus={() => {
@@ -260,7 +289,7 @@ export function InlineSearch() {
                 : "bg-neutral-800/50 text-neutral-500 placeholder:text-neutral-600 cursor-not-allowed"
             )}
           />
-          <div className="absolute right-1 top-1/2 transform -translate-y-1/2 pointer-events-none w-12 flex items-center justify-center">
+          <div className="absolute right-2 top-1/2 transform -translate-y-1/2 pointer-events-none flex items-center justify-end">
             <AnimatePresence mode="wait">
               {showCheckmark ? (
                 <motion.div
@@ -288,7 +317,7 @@ export function InlineSearch() {
                       canMutate ? "text-neutral-400" : "text-neutral-600 opacity-50"
                     )}
                   >
-                    <span className="text-xs">⌘</span>K
+                    <span className="text-xs">{isMac ? "⌘" : "Ctrl"}</span>K
                   </kbd>
                 </motion.div>
               )}
@@ -296,12 +325,6 @@ export function InlineSearch() {
           </div>
         </div>
       </form>
-
-      {/* Beta Disclaimer */}
-      <div className="mt-2 flex items-center gap-1 text-[10px] font-mono text-neutral-500 ml-0.5">
-        <ZapIcon className="size-3 text-neutral-400 stroke-1" />
-        <span>[EXPERIMENTAL FREE BETA]</span>
-      </div>
 
       {/* Search Results Dropdown */}
       <AnimatePresence>
@@ -330,11 +353,13 @@ export function InlineSearch() {
             <div
               className={cn(
                 "overflow-y-auto scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-neutral-600/30 scrollbar-track-transparent hover:scrollbar-thumb-neutral-600/50 bg-neutral-900",
+                // vh cap is a fallback until the measured cap (below) kicks in
                 isMobile ? "max-h-[70vh]" : "max-h-[60vh]"
               )}
+              style={{ maxHeight: dropdownMaxH }}
             >
               {isSearching || searchResults ? (
-                <SearchResults className="p-2" onTrackSelect={handleTrackSelection} />
+                <SearchResults className="p-2" onTrackSelect={handleTrackSelection} contextId={contextId} />
               ) : (
                 <div className="p-8 text-center">
                   <h3 className="text-lg font-medium text-white mb-2">Start typing to search</h3>

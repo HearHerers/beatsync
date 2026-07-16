@@ -23,7 +23,8 @@ const LATE_RETRY_DELAY_MS = 250;
 interface ShapeChain {
   buffer?: AudioBuffer;
   bufferPromise?: Promise<AudioBuffer>; // in-flight decode for the current URL
-  url?: string; // URL the buffer was decoded from
+  url?: string; // URL the CURRENT buffer was actually decoded from — set only once decode completes
+  requestedUrl?: string; // latest URL asked for; leads `url` while a decode is in flight
   sourceNode?: AudioBufferSourceNode;
   proximityGain: GainNode; // 0..1 controlled by GPS distance
   // A play() that arrived before the buffer was ready (typical for late joiners who
@@ -80,15 +81,20 @@ async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
 
   const decode = downloadBufferFromURL({ url }).then((r) => r.audioBuffer);
 
-  chain.url = url;
+  // Mark this as the latest requested URL, but DON'T touch chain.url yet — that
+  // names the track the current buffer actually holds, and until decode finishes
+  // the buffer is still the previous track's. Setting chain.url early is what let
+  // a scheduled PLAY play the stale buffer while the UI showed the new track (#97).
+  chain.requestedUrl = url;
   chain.bufferPromise = decode;
   try {
     const buffer = await decode;
-    if (chains.get(shapeId)?.url !== url) {
+    if (chains.get(shapeId)?.requestedUrl !== url) {
       // A newer load superseded this one before decode finished — drop it.
       return;
     }
     chain.buffer = buffer;
+    chain.url = url; // buffer and its URL now agree
     // Mirror the decoded buffer into the global audioSources registry so
     // getAudioDuration (Queue's "--:--" → duration cell) lights up for shape
     // tracks. Audio rooms hit this same path via loadAudioSource() in
@@ -163,6 +169,19 @@ function playShape(
   // gate). Stash the play parameters; loadAudioForShape will replay once decode
   // completes.
   if (!chain.buffer || chain.url !== audioSource) {
+    // Switching to a different track: stop the current source NOW. Otherwise it
+    // keeps looping (source.loop) audibly while the new track decodes, so the UI
+    // shows the new track but you still hear the previous one (#97). A brief
+    // silence during decode is expected (and closed by the server timeline).
+    if (chain.url !== audioSource && chain.sourceNode) {
+      try {
+        chain.sourceNode.stop();
+      } catch {
+        /* already stopped */
+      }
+      chain.sourceNode.disconnect();
+      chain.sourceNode = undefined;
+    }
     chain.pendingPlay = { audioSource, trackTimeSeconds, targetServerTime, playbackRate };
     void loadAudioForShape(shapeId, audioSource);
     return;
@@ -286,7 +305,24 @@ function playShape(
 
 function pauseShape(shapeId: string): void {
   const chain = chains.get(shapeId);
-  if (!chain?.sourceNode) return;
+  if (!chain) return;
+  // Clear any pending play that's waiting on decode / NTP / autoplay-unlock.
+  // Without this, pressing pause during the URL-change decode interval would
+  // let the queued play fire once decode finishes — audio plays despite the
+  // user having paused. Also clear the NTP / context-state waiters so they
+  // don't trigger after pause.
+  chain.pendingPlay = undefined;
+  const ntpWaiter = ntpWaiters.get(shapeId);
+  if (ntpWaiter) {
+    clearInterval(ntpWaiter);
+    ntpWaiters.delete(shapeId);
+  }
+  const ctxWaiter = ctxWaiters.get(shapeId);
+  if (ctxWaiter) {
+    audioContextManager.getContext().removeEventListener("statechange", ctxWaiter);
+    ctxWaiters.delete(shapeId);
+  }
+  if (!chain.sourceNode) return;
   stopSource(chain.sourceNode);
   chain.sourceNode = undefined;
 }
@@ -442,10 +478,18 @@ function knownShapeIds(): string[] {
   return Array.from(chains.keys());
 }
 
+/** True if we're locally playing this shape (source node is alive). The
+ *  server may say a shape is "playing" while we're locally paused (because
+ *  we're far away and the listener is range-culling). */
+function isShapePlaying(shapeId: string): boolean {
+  return !!chains.get(shapeId)?.sourceNode;
+}
+
 export const mapAudio = {
   loadAudioForShape,
   playShape,
   pauseShape,
+  isShapePlaying,
   setProximityGain,
   unloadShape,
   knownShapeIds,

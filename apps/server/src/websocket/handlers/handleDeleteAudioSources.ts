@@ -1,27 +1,55 @@
 import { IS_DEMO_MODE } from "@/demo";
-import { deleteObject, extractKeyFromUrl } from "@/lib/r2";
+import { deleteObject, keyFromPublicUrl } from "@/lib/r2";
 import type { RoomManager } from "@/managers/RoomManager";
 import { sendBroadcast } from "@/utils/responses";
 import { requireCanMutate } from "@/websocket/middlewares";
 import type { HandlerFunction } from "@/websocket/types";
 import type { BunServer } from "@/utils/websocket";
 import type { ExtractWSRequestFrom } from "@beatsync/shared";
+import { MAIN_CONTEXT_ID } from "@beatsync/shared";
 
 /**
  * Deleting the playing track resets the room's playback state to paused, but
  * that alone doesn't stop audio already running on clients — schedule an
- * explicit pause for everyone.
+ * explicit pause for everyone. Scoped to `contextId` when given (a zone
+ * playlist); omitted, it targets the main-context/audio-room channel.
  */
-const broadcastPauseForRemovedCurrent = (server: BunServer, roomId: string, room: RoomManager) => {
+const broadcastPauseForRemovedCurrent = (server: BunServer, roomId: string, room: RoomManager, contextId?: string) => {
   sendBroadcast({
     server,
     roomId,
     message: {
       type: "SCHEDULED_ACTION",
-      scheduledAction: { type: "PAUSE", audioSource: "", trackTimeSeconds: 0 },
+      scheduledAction: {
+        type: "PAUSE",
+        audioSource: "",
+        trackTimeSeconds: 0,
+        ...(contextId !== undefined && { contextId }),
+      },
       serverTimeToExecute: room.getScheduledExecutionTime(),
     },
   });
+};
+
+/**
+ * A pool track added to zone playlists is the SAME URL referenced from several
+ * contexts, so deleting the file must also strip the URL from every zone
+ * context — otherwise those playlists keep dead links to the deleted object.
+ * (Main is handled separately by removeAudioSources.) Returns the ids of
+ * contexts whose currently-playing track was removed and thus need a pause.
+ */
+const removeFromZoneContexts = (room: RoomManager, urls: string[]): string[] => {
+  const pausedContexts: string[] = [];
+  for (const contextId of room.getPlaylistIds()) {
+    if (contextId === MAIN_CONTEXT_ID) continue;
+    let removedCurrent = false;
+    for (const url of urls) {
+      const result = room.removeTrackFromContext(contextId, url);
+      if (result?.removedCurrent) removedCurrent = true;
+    }
+    if (removedCurrent) pausedContexts.push(contextId);
+  }
+  return pausedContexts;
 };
 
 export const handleDeleteAudioSources: HandlerFunction<ExtractWSRequestFrom["DELETE_AUDIO_SOURCES"]> = async ({
@@ -46,6 +74,9 @@ export const handleDeleteAudioSources: HandlerFunction<ExtractWSRequestFrom["DEL
     const { updated, removedCurrent } = room.removeAudioSources(urlsToDelete);
     if (removedCurrent) {
       broadcastPauseForRemovedCurrent(server, ws.data.roomId, room);
+    }
+    for (const contextId of removeFromZoneContexts(room, urlsToDelete)) {
+      broadcastPauseForRemovedCurrent(server, ws.data.roomId, room, contextId);
     }
     sendBroadcast({
       server,
@@ -79,9 +110,12 @@ export const handleDeleteAudioSources: HandlerFunction<ExtractWSRequestFrom["DEL
       return;
     }
 
-    // Otherwise we need to actually delete the file from R2
+    // Otherwise we need to actually delete the file from R2. Key derivation
+    // must be bucket-aware (keyFromPublicUrl, not the raw URL pathname):
+    // path-style PUBLIC_URLs fold the bucket into the path, and DeleteObject
+    // on a wrong key "succeeds" silently, orphaning the object.
     try {
-      const key = extractKeyFromUrl(url);
+      const key = keyFromPublicUrl(url);
 
       if (!key) {
         throw new Error(`Failed to extract key from URL: ${url}`);
@@ -112,6 +146,9 @@ export const handleDeleteAudioSources: HandlerFunction<ExtractWSRequestFrom["DEL
 
   if (removedCurrent) {
     broadcastPauseForRemovedCurrent(server, ws.data.roomId, room);
+  }
+  for (const contextId of removeFromZoneContexts(room, urlsToRemove)) {
+    broadcastPauseForRemovedCurrent(server, ws.data.roomId, room, contextId);
   }
 
   // Broadcast updated queue to all clients

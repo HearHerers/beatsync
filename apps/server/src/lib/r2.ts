@@ -119,9 +119,20 @@ export function extractKeyFromUrl(url: string): string | null {
  * @returns true if the file exists, false otherwise
  */
 export async function validateAudioFileExists(audioUrl: string): Promise<boolean> {
+  // Tracks whose URL is not in our bucket (music-provider streams, e.g.
+  // Navidrome) have nothing to HEAD in R2 — treat them as valid rather than
+  // dropping them on restore. The client handles a dead provider gracefully.
+  if (!isOwnBucketUrl(audioUrl)) {
+    return true;
+  }
+
   try {
-    // Extract the key from the public URL
-    const key = extractKeyFromUrl(audioUrl);
+    // Derive the object key relative to PUBLIC_URL. Must be bucket-aware:
+    // path-style PUBLIC_URLs (https://host/bucket) fold the bucket into the
+    // URL path, and using the raw pathname as the key (the old
+    // extractKeyFromUrl behavior) 404s every HEAD — which made restore drop
+    // every uploaded track on server restart.
+    const key = keyFromPublicUrl(audioUrl);
 
     if (!key) {
       console.error(`Could not extract key from URL: ${audioUrl}`);
@@ -139,6 +150,23 @@ export async function validateAudioFileExists(audioUrl: string): Promise<boolean
   } catch {
     console.error(`Error validating audio file ${audioUrl}:`);
     return false;
+  }
+}
+
+/**
+ * Byte size of an object, or null if it doesn't exist / HEAD fails.
+ */
+export async function getObjectSize(key: string): Promise<number | null> {
+  try {
+    const response = await r2Client.send(
+      new HeadObjectCommand({
+        Bucket: S3_CONFIG.BUCKET_NAME,
+        Key: key,
+      })
+    );
+    return response.ContentLength ?? null;
+  } catch {
+    return null;
   }
 }
 

@@ -14,9 +14,22 @@ interface AudioUploaderMinimalProps {
   contextId?: string;
   /** Optional label override; default depends on whether contextId is set. */
   label?: string;
+  /** Noun for where uploads land when there's no contextId (e.g. "Room Pool").
+   *  Without it, the main-context copy calls the destination a "queue" (correct
+   *  for audio rooms, not for a map room's pool/library). */
+  destination?: string;
+  /** Which sub-affordances to render: the drop-zone, the paste-URL box, or both
+   *  (default). Lets a tabbed container (AddTracks) show one at a time. */
+  only?: "both" | "upload" | "url";
 }
 
-export const AudioUploaderMinimal = ({ contextId, label }: AudioUploaderMinimalProps = {}) => {
+export const AudioUploaderMinimal = ({
+  contextId,
+  label,
+  destination,
+  only = "both",
+}: AudioUploaderMinimalProps = {}) => {
+  const showUpload = only !== "url";
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -37,11 +50,15 @@ export const AudioUploaderMinimal = ({ contextId, label }: AudioUploaderMinimalP
       setIsUploading(true);
 
       // Upload the file to the server as binary
-      await uploadAudioFile({
+      const result = await uploadAudioFile({
         file,
         roomId,
         contextId,
       });
+
+      if (result.deduped) {
+        toast.info("Already in this room — linked the existing file.");
+      }
 
       setTimeout(() => setFileName(null), 3000);
     } catch (err) {
@@ -96,57 +113,63 @@ export const AudioUploaderMinimal = ({ contextId, label }: AudioUploaderMinimalP
       className={cn(
         "border border-neutral-700/50 rounded-md mx-2 transition-all overflow-hidden",
         isDisabled ? "bg-neutral-800/20 opacity-50" : "bg-neutral-800/30 hover:bg-neutral-800/50",
-        isDragging && !isDisabled ? "outline outline-primary-400 outline-dashed" : "outline-none"
+        showUpload && isDragging && !isDisabled ? "outline outline-primary-400 outline-dashed" : "outline-none"
       )}
-      id="drop_zone"
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDragEnd={onDragLeave}
-      onDrop={onDropEvent}
+      {...(showUpload ? { id: "drop_zone", onDragOver, onDragLeave, onDragEnd: onDragLeave, onDrop: onDropEvent } : {})}
       title={isDisabled ? "Admin-only mode - only admins can upload" : undefined}
     >
-      <label htmlFor="audio-upload" className={cn("block w-full", isDisabled ? "" : "cursor-pointer")}>
-        <div className="p-3 flex items-center gap-3">
-          <div
-            className={cn(
-              "p-1.5 rounded-md flex-shrink-0",
-              isDisabled ? "bg-neutral-600 text-neutral-400" : "bg-primary-700 text-white"
-            )}
-          >
-            {isUploading ? <CloudUpload className="h-4 w-4 animate-pulse" /> : <Plus className="h-4 w-4" />}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-xs font-medium text-white truncate">
-              {isUploading ? "Uploading..." : fileName ? trimFileName(fileName) : (label ?? "Upload audio")}
+      {showUpload && (
+        <label htmlFor="audio-upload" className={cn("block w-full", isDisabled ? "" : "cursor-pointer")}>
+          <div className="p-3 flex items-center gap-3">
+            <div
+              className={cn(
+                "p-1.5 rounded-md flex-shrink-0",
+                isDisabled ? "bg-neutral-600 text-neutral-400" : "bg-primary-700 text-white"
+              )}
+            >
+              {isUploading ? <CloudUpload className="h-4 w-4 animate-pulse" /> : <Plus className="h-4 w-4" />}
             </div>
-            {!isUploading && !fileName && (
-              <div className={cn("text-xs truncate", isDisabled ? "text-neutral-500" : "text-neutral-400")}>
-                {isDisabled ? "Must be an admin to upload" : contextId ? "Add to this zone" : "Add music to queue"}
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-medium text-white truncate">
+                {isUploading ? "Uploading..." : fileName ? trimFileName(fileName) : (label ?? "Upload audio")}
               </div>
-            )}
+              {!isUploading && !fileName && (
+                <div className={cn("text-xs truncate", isDisabled ? "text-neutral-500" : "text-neutral-400")}>
+                  {isDisabled
+                    ? "Must be an admin to upload"
+                    : contextId
+                      ? "Add to this zone"
+                      : destination
+                        ? `Add to the ${destination}`
+                        : "Add music to queue"}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </label>
+        </label>
+      )}
 
-      <input
-        id="audio-upload"
-        type="file"
-        accept="audio/mpeg,audio/mp3,audio/wav,audio/aac,audio/ogg,audio/webm,audio/flac,.mp3,.wav,.m4a,.aac,.ogg,.webm,.flac"
-        onChange={onInputChange}
-        disabled={isUploading || isDisabled}
-        className="hidden"
-      />
+      {showUpload && (
+        <input
+          id="audio-upload"
+          type="file"
+          accept="audio/mpeg,audio/mp3,audio/wav,audio/aac,audio/ogg,audio/webm,audio/flac,.mp3,.wav,.m4a,.aac,.ogg,.webm,.flac"
+          onChange={onInputChange}
+          disabled={isUploading || isDisabled}
+          className="hidden"
+        />
+      )}
 
       {/* Paste-URL affordance — bypasses R2 upload and registers an external URL directly
           via /upload/complete. The URL must be CORS-allowing and serve audio content. */}
-      {!isDisabled && (
-        <div className="flex items-center gap-1.5 border-t border-neutral-700/50 px-3 py-2">
+      {only !== "upload" && !isDisabled && (
+        <div className={cn("flex items-center gap-1.5 px-3 py-2", showUpload && "border-t border-neutral-700/50")}>
           <Link2 className="size-3.5 shrink-0 text-neutral-400" />
           <input
             type="url"
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
-            placeholder="…or paste an audio URL"
+            placeholder={only === "url" ? "Paste an audio URL" : "…or paste an audio URL"}
             className="min-w-0 flex-1 bg-transparent text-xs text-white placeholder:text-neutral-500 focus:outline-none"
             disabled={isRegisteringUrl}
             onKeyDown={async (e) => {
@@ -157,7 +180,9 @@ export const AudioUploaderMinimal = ({ contextId, label }: AudioUploaderMinimalP
               try {
                 await registerAudioUrl({ url, roomId, contextId });
                 setUrlInput("");
-                toast.success(contextId ? "Added to zone" : "Audio URL added to queue");
+                toast.success(
+                  contextId ? "Added to zone" : destination ? `Added to the ${destination}` : "Audio URL added to queue"
+                );
               } catch (err) {
                 console.error(err);
                 toast.error("Failed to register URL");

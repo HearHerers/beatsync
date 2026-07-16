@@ -26,9 +26,10 @@ import {
   handleRemoveTrackFromContext,
   handleReorderTrackInContext,
 } from "@/websocket/handlers/contextTracks";
-import { handleSetUsername } from "@/websocket/handlers/setUsername";
 import { handlePauseAllContexts } from "@/websocket/handlers/pauseAllContexts";
 import { handlePlayAllContexts } from "@/websocket/handlers/playAllContexts";
+import { handleSetRoomName } from "@/websocket/handlers/setRoomName";
+import { handleSetUsername } from "@/websocket/handlers/setUsername";
 import { handleSetTrackBeatgrid, handleSyncZones } from "@/websocket/handlers/zoneSync";
 import { handleSync } from "@/websocket/handlers/sync";
 import {
@@ -39,6 +40,7 @@ import {
   handleSetGeoPosition,
   handleSetMapMetadata,
   handleSetShapeFalloff,
+  handleSetShapeName,
   handleSetShapeGroup,
   handleSetVisibility,
   handleUpdateShape,
@@ -204,6 +206,10 @@ export const WS_REGISTRY: WebsocketRegistry = {
     handle: handleSetShapeFalloff,
     description: "Set the edge-falloff distance (meters past the shape boundary at which gain hits 0)",
   },
+  [ClientActionEnum.enum.SET_SHAPE_NAME]: {
+    handle: handleSetShapeName,
+    description: "Set or clear a shape's display name (empty = 'Zone <id>')",
+  },
   [ClientActionEnum.enum.SET_SHAPE_GROUP]: {
     handle: handleSetShapeGroup,
     description: "Link/unlink a shape to a transport group",
@@ -211,6 +217,10 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.SET_MAP_METADATA]: {
     handle: handleSetMapMetadata,
     description: "Update the room's default Leaflet center/zoom",
+  },
+  [ClientActionEnum.enum.SET_ROOM_NAME]: {
+    handle: handleSetRoomName,
+    description: "Set or clear the room's display name (empty = use 'Room <id>')",
   },
   [ClientActionEnum.enum.SET_USERNAME]: {
     handle: handleSetUsername,

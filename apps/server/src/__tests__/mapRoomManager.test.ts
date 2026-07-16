@@ -3,6 +3,7 @@
 // shape creates a matching playlist context with id == shape.id.
 
 import type { ShapeType } from "@beatsync/shared";
+import { MAIN_CONTEXT_ID } from "@beatsync/shared";
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { mockR2 } from "@/__tests__/mocks/r2";
 import { createMockWs } from "@/__tests__/mocks/websocket";
@@ -296,5 +297,46 @@ describe("RoomManager: map backup round-trip", () => {
     const restoredShape = restored.getShape("s1");
     expect(restoredShape?.falloffMeters).toBe(100);
     expect(restoredShape?.groupId).toBe("g1");
+  });
+});
+
+describe("RoomManager: Room Pool superset invariant", () => {
+  const poolUrls = (room: RoomManager) => (room.getPlaylist(MAIN_CONTEXT_ID)?.tracks ?? []).map((t) => t.url);
+
+  it("a track added to a zone is also registered in the pool", () => {
+    const room = new RoomManager(ROOM_ID);
+    room.setRoomType("map");
+    room.addShape(makeShape("s1"));
+
+    room.addTrackToContext("s1", { url: "https://x/a.mp3" });
+
+    expect(room.getPlaylist("s1")?.tracks.map((t) => t.url)).toEqual(["https://x/a.mp3"]);
+    expect(poolUrls(room)).toEqual(["https://x/a.mp3"]);
+  });
+
+  it("imported zone tracks are mirrored into the pool", () => {
+    const room = new RoomManager(ROOM_ID);
+    room.setRoomType("map");
+    room.addShape(makeShape("s1"));
+
+    room.addTracksToContext("s1", [{ url: "https://x/a.mp3" }, { url: "https://x/b.mp3" }]);
+
+    expect(poolUrls(room)).toEqual(["https://x/a.mp3", "https://x/b.mp3"]);
+  });
+
+  it("the same track in two zones appears once in the pool, and stays after one zone removes it", () => {
+    const room = new RoomManager(ROOM_ID);
+    room.setRoomType("map");
+    room.addShape(makeShape("s1"));
+    room.addShape(makeShape("s2"));
+
+    room.addTrackToContext("s1", { url: "https://x/a.mp3" });
+    room.addTrackToContext("s2", { url: "https://x/a.mp3" });
+    expect(poolUrls(room)).toEqual(["https://x/a.mp3"]);
+
+    // Removing from one zone doesn't touch the pool (pool ⊇ zones, not vice versa).
+    room.removeTrackFromContext("s1", "https://x/a.mp3");
+    expect(room.getPlaylist("s1")?.tracks).toEqual([]);
+    expect(poolUrls(room)).toEqual(["https://x/a.mp3"]);
   });
 });

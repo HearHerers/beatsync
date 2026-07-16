@@ -101,11 +101,16 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
   const adminParam = adminSecret ? `&admin=${encodeURIComponent(adminSecret)}` : "";
   const creatorParam = creatorSecret ? `&creator=${encodeURIComponent(creatorSecret)}` : "";
   const roomTypeParam = requestedRoomType ? `&roomType=${encodeURIComponent(requestedRoomType)}` : "";
+  // Shared-link elevation: ?roomAdminToken= on the PAGE URL wins over
+  // localStorage so a fresh device can join as co-curator. We don't persist it
+  // here — if the server accepts it, it unicasts SET_ADMIN_TOKEN back and the
+  // handler below stores it, so a bogus URL token never pollutes localStorage.
+  const urlRoomAdminToken = searchParams?.get("roomAdminToken") ?? null;
 
   const createConnection = () => {
     // Re-read the room's admin token each connect — it may have just been issued
     // (SET_ADMIN_TOKEN) so a reconnect re-presents it and keeps the curator admin.
-    const roomAdminToken = roomId ? getAdminToken(roomId) : null;
+    const roomAdminToken = urlRoomAdminToken ?? (roomId ? getAdminToken(roomId) : null);
     const adminTokenParam = roomAdminToken ? `&roomAdminToken=${encodeURIComponent(roomAdminToken)}` : "";
     const SOCKET_URL = `${getWsUrl()}?roomId=${roomId}&username=${username}&clientId=${clientId}${adminParam}${creatorParam}${roomTypeParam}${adminTokenParam}`;
     console.log("Creating new WS connection to", SOCKET_URL);
@@ -212,9 +217,12 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
           // Authoritative room-type info from the server. Wins over the URL hint.
           useRoomStore.getState().setRoomType(event.roomType);
           if (event.mapMetadata) useRoomStore.getState().setMapMetadata(event.mapMetadata);
+          useRoomStore.getState().setRoomName(event.roomName);
           if (event.defaultTileLayerId) useRoomStore.getState().setDefaultTileLayerId(event.defaultTileLayerId);
         } else if (event.type === "MAP_METADATA_UPDATE") {
           useRoomStore.getState().setMapMetadata(event.metadata);
+        } else if (event.type === "ROOM_NAME_UPDATE") {
+          useRoomStore.getState().setRoomName(event.roomName);
         } else if (event.type === "DEFAULT_TILE_LAYER_UPDATE") {
           useRoomStore.getState().setDefaultTileLayerId(event.tileLayerId);
         } else if (event.type === "SHAPES_UPDATE") {
@@ -224,6 +232,22 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
           // reads via the existing audioSources/playbackState path; map-room
           // UI (and any future multi-context UI) reads per-context tracks from
           // state.playlists.
+          //
+          // Before swapping in the new snapshot, find any context whose
+          // playback transitioned from playing → paused (e.g. server-side
+          // REMOVE_TRACK_FROM_CONTEXT cleared the playing track) and stop the
+          // matching mapAudio chain. Without this, removing the playing track
+          // leaves the source node running locally even though the UI shows
+          // paused.
+          const previousPlaylists = useGlobalStore.getState().playlists;
+          for (const incoming of event.playlists) {
+            const prev = previousPlaylists.get(incoming.id);
+            const wasPlaying = prev?.playbackState.type === "playing";
+            const nowPaused = incoming.playbackState.type !== "playing";
+            if (wasPlaying && nowPaused) {
+              mapAudio.pauseShape(incoming.id);
+            }
+          }
           useGlobalStore.getState().setPlaylists(event.playlists);
         } else if (event.type === "CONTEXT_LOOP_UPDATE") {
           useGlobalStore.getState().setContextLoop(event.contextId, event.loop);
@@ -292,27 +316,29 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
           processMetronomeConfig(scheduledAction);
         }
       } else if (response.type === "SEARCH_RESPONSE") {
-        console.log("Received search response:", response);
-        const { setSearchResults, setIsSearching, setIsLoadingMoreResults, setHasMoreResults, isLoadingMoreResults } =
-          useGlobalStore.getState();
+        const {
+          setSearchResults,
+          setIsSearching,
+          setIsLoadingMoreResults,
+          setHasMoreResults,
+          isLoadingMoreResults,
+          searchQuery,
+        } = useGlobalStore.getState();
 
-        // Determine if this is pagination or new search
-        const isAppending = isLoadingMoreResults;
-
-        // Update search results (append if pagination, replace if new search)
-        setSearchResults(response.response, isAppending);
-
-        // Update loading states
-        setIsSearching(false);
-        setIsLoadingMoreResults(false);
-
-        // Update hasMoreResults based on response
-        if (response.response.type === "success") {
-          const { total, items, offset } = response.response.response.data.tracks;
-          const hasMore = offset + items.length < total;
-          setHasMoreResults(hasMore);
-        } else {
-          setHasMoreResults(false);
+        // Drop stale / out-of-order responses. Search-as-you-type fires
+        // overlapping requests; only apply the one whose echoed query matches
+        // what's currently in the box (appends reuse the same query, so match).
+        if (response.query === searchQuery) {
+          const isAppending = isLoadingMoreResults;
+          setSearchResults(response.response, isAppending);
+          setIsSearching(false);
+          setIsLoadingMoreResults(false);
+          if (response.response.type === "success") {
+            const { total, items, offset } = response.response.response.data.tracks;
+            setHasMoreResults(offset + items.length < total);
+          } else {
+            setHasMoreResults(false);
+          }
         }
       } else if (response.type === "STREAM_JOB_UPDATE") {
         console.log("Received stream job update:", response.activeJobCount);

@@ -53,8 +53,10 @@ export const ClientActionEnum = z.enum([
   "DELETE_SHAPE",
   "CLEAR_SHAPES",
   "SET_SHAPE_FALLOFF",
+  "SET_SHAPE_NAME",
   "SET_SHAPE_GROUP",
   "SET_MAP_METADATA",
+  "SET_ROOM_NAME",
   "SET_USERNAME",
   "SET_DEFAULT_TILE_LAYER", // Admin sets the room-wide default base map
   "SET_GEO_POSITION", // Client GPS update
@@ -164,8 +166,13 @@ export const SearchMusicSchema = z.object({
 
 export const StreamMusicSchema = z.object({
   type: z.literal(ClientActionEnum.enum.STREAM_MUSIC),
-  trackId: z.number(),
+  // String to support Navidrome/Subsonic opaque IDs (numeric provider IDs are
+  // sent as strings too). See TrackSchema.id in provider.ts.
+  trackId: z.string(),
   trackName: z.string().optional(),
+  /** Route the streamed track into this playlist context (e.g. a shape.id in
+   * map rooms). Omitted = the room-wide "main" playlist (audio rooms). */
+  contextId: z.string().optional(),
 });
 
 export const SetGlobalVolumeSchema = z.object({
@@ -347,6 +354,14 @@ export const SetShapeFalloffSchema = z.object({
 });
 export type SetShapeFalloffType = z.infer<typeof SetShapeFalloffSchema>;
 
+export const SetShapeNameSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.SET_SHAPE_NAME),
+  shapeId: z.string(),
+  /** Empty string clears the name (UI falls back to "Zone <id>"). */
+  name: z.string().max(80),
+});
+export type SetShapeNameType = z.infer<typeof SetShapeNameSchema>;
+
 export const SetShapeGroupSchema = z.object({
   type: z.literal(ClientActionEnum.enum.SET_SHAPE_GROUP),
   shapeId: z.string(),
@@ -360,6 +375,12 @@ export const SetMapMetadataSchema = z.object({
 });
 export type SetMapMetadataType = z.infer<typeof SetMapMetadataSchema>;
 
+export const SetRoomNameSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.SET_ROOM_NAME),
+  /** Empty string clears the name (UI falls back to "Room <id>"). */
+  roomName: z.string().max(80),
+});
+export type SetRoomNameType = z.infer<typeof SetRoomNameSchema>;
 export const SetUsernameSchema = z.object({
   type: z.literal(ClientActionEnum.enum.SET_USERNAME),
   /** Display name for this client. Trimmed + length-capped server-side. */
@@ -423,8 +444,10 @@ export const WSRequestSchema = z.discriminatedUnion("type", [
   DeleteShapeSchema,
   ClearShapesSchema,
   SetShapeFalloffSchema,
+  SetShapeNameSchema,
   SetShapeGroupSchema,
   SetMapMetadataSchema,
+  SetRoomNameSchema,
   SetUsernameSchema,
   SetDefaultTileLayerSchema,
   SetGeoPositionSchema,

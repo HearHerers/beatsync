@@ -98,6 +98,9 @@ const RoomBackupSchema = z.object({
     .optional(),
   /** Per-context playlist state — single source of truth for room audio. */
   playlists: z.array(PlaylistBackupSchema),
+  /** Display name for the room, set by an admin. Audio rooms and map rooms both
+   *  use it — UI falls back to "Room <id>" when unset. */
+  roomName: z.string().optional(),
   /** Map-room state. Only meaningful when roomType === "map". */
   roomType: RoomTypeEnum.optional(),
   mapMetadata: MapMetadataSchema.optional(),
@@ -105,6 +108,8 @@ const RoomBackupSchema = z.object({
   shapes: z.array(ShapeSchema).optional(),
   /** Recoverable per-room admin token (non-demo). */
   adminToken: z.string().optional(),
+  /** Operator soft-delete: hidden from discovery, joins rejected, R2 audio kept. */
+  archived: z.boolean().optional(),
 });
 export type RoomBackupType = z.infer<typeof RoomBackupSchema>;
 
@@ -248,13 +253,18 @@ export class RoomManager {
 
   private demoAudioReadyClients = new Set<string>();
 
-  // Map-room state. roomType is fixed for the room's lifetime (set by the first
-  // connecting client via the WS upgrade ?roomType query param). When 'audio',
+  // Map-room state. roomType is fixed for the room's lifetime (set by the client
+  // that creates the room via the WS upgrade ?roomType query param). When 'audio',
   // shape methods refuse to mutate. When 'map', shapes is the authoritative
   // geometry registry — each shape has a corresponding playlist context with
   // id = shape.id (the playlist holds its tracks + playback state).
   private roomType: RoomTypeValue = "audio";
   private mapMetadata?: MapMetadataType;
+  private roomName?: string;
+  // Operator soft-delete (see routes/admin.ts). Persisted in the room backup;
+  // an archived room stays resident with its R2 audio but is hidden from
+  // discovery and rejects new WS joins until unarchived.
+  private archived = false;
   // Admin-chosen room-wide default base map. Undefined = clients use their
   // build default (Mapbox if a token is set, else Esri).
   private defaultTileLayerId?: MapTileLayerId;
@@ -491,6 +501,10 @@ export class RoomManager {
     const filter = contextIds && contextIds.length > 0 ? new Set(contextIds) : undefined;
     const actions: PlayActionType[] = [];
     for (const playlist of this.playlists.values()) {
+      // In a map room the main context is the Room Pool — a superset library of
+      // every track (see the pool-invariant in addTrackToContext), not a
+      // playable zone — so never batch-play it. Audio rooms have only main.
+      if (this.isMapRoom() && playlist.id === MAIN_CONTEXT_ID) continue;
       if (filter && !filter.has(playlist.id)) continue;
       if (playlist.tracks.length === 0) continue;
       // Resume mode never restarts a context that's already running.
@@ -530,6 +544,8 @@ export class RoomManager {
     const filter = contextIds && contextIds.length > 0 ? new Set(contextIds) : undefined;
     const actions: PauseActionType[] = [];
     for (const playlist of this.playlists.values()) {
+      // See buildPlayAllActions: the map room's main context is the pool, not a zone.
+      if (this.isMapRoom() && playlist.id === MAIN_CONTEXT_ID) continue;
       if (filter && !filter.has(playlist.id)) continue;
       if (playlist.playback.type !== "playing") continue;
       actions.push({
@@ -1471,11 +1487,13 @@ export class RoomManager {
         loop: p.loop,
         playbackState: { ...p.playback },
       })),
+      ...(this.roomName && { roomName: this.roomName }),
       ...(this.roomType !== "audio" && { roomType: this.roomType }),
       ...(this.mapMetadata && { mapMetadata: this.mapMetadata }),
       ...(this.defaultTileLayerId && { defaultTileLayerId: this.defaultTileLayerId }),
       ...(this.shapes.size > 0 && { shapes: Array.from(this.shapes.values()) }),
       ...(this.adminToken && { adminToken: this.adminToken }),
+      ...(this.archived && { archived: true }),
     };
   }
 
@@ -1503,6 +1521,37 @@ export class RoomManager {
       this.shapes.clear();
       for (const s of backup.shapes) this.shapes.set(s.id, s);
     }
+  }
+
+  /** Operator soft-delete flag (persisted via createBackup / restore). */
+  isArchived(): boolean {
+    return this.archived;
+  }
+  setArchived(archived: boolean): void {
+    this.archived = archived;
+  }
+
+  /**
+   * Close every live WebSocket in the room (operator archive/delete). The
+   * close handlers take care of client removal and last-disconnect logic.
+   */
+  evictAllClients(reason: string): void {
+    for (const ws of this.wsConnections.values()) {
+      try {
+        ws.close(1000, reason);
+      } catch {
+        // socket already closing/closed — removeClient will still run
+      }
+    }
+  }
+
+  /** Display name for the room. Empty string clears it (UI falls back to "Room <id>"). */
+  getRoomName(): string | undefined {
+    return this.roomName;
+  }
+  setRoomName(name: string): void {
+    const trimmed = name.trim().slice(0, 80);
+    this.roomName = trimmed.length === 0 ? undefined : trimmed;
   }
 
   /**
@@ -1724,6 +1773,15 @@ export class RoomManager {
     return Array.from(this.playlists.keys());
   }
 
+  /** Every distinct track URL across all contexts (pool and zones). */
+  getAllTrackUrls(): string[] {
+    const urls = new Set<string>();
+    for (const playlist of this.playlists.values()) {
+      for (const track of playlist.tracks) urls.add(track.url);
+    }
+    return Array.from(urls);
+  }
+
   /**
    * Return all playlists in wire format for broadcasting to clients. Used by
    * the initial-state burst on connect, and any time the playlist set changes.
@@ -1843,9 +1901,31 @@ export class RoomManager {
   addTrackToContext(contextId: string, source: AudioSourceType): AudioSourceType[] | undefined {
     const playlist = this.playlists.get(contextId);
     if (!playlist) return undefined;
+    // Beatgrid is a property of the audio file, not one occurrence. If this URL
+    // already has a grid on some other copy (e.g. imported onto the Room Pool
+    // copy before it was assigned to any zone), inherit it so the new zone
+    // track keeps its BPM and stays beat-sync-eligible. Without this, adding a
+    // gridded pool track to a zone would silently drop the grid.
+    let toAdd = source;
+    if (!toAdd.beatgrid) {
+      for (const pl of this.playlists.values()) {
+        const existing = pl.tracks.find((t) => t.url === source.url && t.beatgrid);
+        if (existing?.beatgrid) {
+          toAdd = { ...source, beatgrid: existing.beatgrid };
+          break;
+        }
+      }
+    }
     // De-duplicate by URL — re-adding an existing source is a no-op.
     if (!playlist.tracks.some((t) => t.url === source.url)) {
-      playlist.tracks = [...playlist.tracks, source];
+      playlist.tracks = [...playlist.tracks, toAdd];
+    }
+    // Pool invariant: the main context (Room Pool) is a superset of every
+    // zone's tracks — anything added to a zone is also registered in the pool,
+    // which is the single place a track is permanently deleted from. The
+    // contextId guard keeps the recursion one level deep.
+    if (contextId !== MAIN_CONTEXT_ID) {
+      this.addTrackToContext(MAIN_CONTEXT_ID, toAdd);
     }
     return playlist.tracks;
   }
@@ -1868,6 +1948,10 @@ export class RoomManager {
     }
     if (additions.length > 0) {
       playlist.tracks = [...playlist.tracks, ...additions];
+    }
+    // Pool invariant (see addTrackToContext): mirror zone imports into the pool.
+    if (contextId !== MAIN_CONTEXT_ID) {
+      this.addTracksToContext(MAIN_CONTEXT_ID, sources);
     }
     return playlist.tracks;
   }
@@ -1951,9 +2035,9 @@ export class RoomManager {
   }
 
   /**
-   * Set the room's type. The first client to connect wins; subsequent attempts
-   * to change the type after clients have joined throw. Idempotent for same-
-   * value sets.
+   * Set the room's type. Only meant for brand-new rooms (the creating client
+   * wins — see handleOpen); attempts to change the type while clients are
+   * connected throw. Idempotent for same-value sets.
    */
   setRoomType(roomType: RoomTypeValue): void {
     if (this.roomType === roomType) return;
@@ -2032,6 +2116,24 @@ export class RoomManager {
     const existing = this.shapes.get(shapeId);
     if (!existing) return false;
     this.shapes.set(shapeId, { ...existing, falloffMeters });
+    return true;
+  }
+
+  /**
+   * Set a shape's display name. Empty string clears it (UI falls back to
+   * "Zone <id>"). Returns false if the shape doesn't exist.
+   */
+  setShapeName(shapeId: string, name: string): boolean {
+    const existing = this.shapes.get(shapeId);
+    if (!existing) return false;
+    const trimmed = name.trim().slice(0, 80);
+    const next = { ...existing };
+    if (trimmed.length === 0) {
+      delete next.name;
+    } else {
+      next.name = trimmed;
+    }
+    this.shapes.set(shapeId, next);
     return true;
   }
 

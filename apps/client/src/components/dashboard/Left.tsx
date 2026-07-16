@@ -19,13 +19,15 @@ interface LeftProps {
   /** When true, omit the desktop audio-output delay control (map rooms show it
    *  in their dedicated Settings panel instead). */
   hideDelayControl?: boolean;
-  /** Override the room header label. When set, the `#` icon is hidden and the
-   *  label renders as `{roomLabel} {roomId}` (e.g. map rooms use "HearHere room"). */
+  /** Override the room header label for unnamed rooms. When set, the `#` icon
+   *  is hidden and the label renders as `{roomLabel} {roomId}` (e.g. map rooms
+   *  use "HearHere room"). A user-set room name always wins over this. */
   roomLabel?: string;
 }
 
 export const Left = ({ className, hideUploader = false, hideDelayControl = false, roomLabel }: LeftProps) => {
   const roomId = useRoomStore((state) => state.roomId);
+  const roomName = useRoomStore((state) => state.roomName);
 
   return (
     <motion.div
@@ -49,7 +51,11 @@ export const Left = ({ className, hideUploader = false, hideDelayControl = false
       <motion.div className="px-3.5 space-y-2.5 py-2 mt-1">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 font-medium">
-            {roomLabel ? (
+            {roomName ? (
+              <span>
+                {roomName} <span className="text-neutral-500 font-normal">#{roomId}</span>
+              </span>
+            ) : roomLabel ? (
               <span>
                 {roomLabel} {roomId}
               </span>

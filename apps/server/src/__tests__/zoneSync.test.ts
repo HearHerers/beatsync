@@ -6,7 +6,7 @@
 //   Bump Talkin (Paul Johnson): 132.4 BPM, first downbeat 0.004s
 
 import type { BeatgridType } from "@beatsync/shared";
-import { epochNow } from "@beatsync/shared";
+import { epochNow, MAIN_CONTEXT_ID } from "@beatsync/shared";
 import { describe, expect, it } from "bun:test";
 import { mockR2 } from "@/__tests__/mocks/r2";
 import { computeZoneSync, zonePositionAt, type ZoneSyncState } from "@/lib/zoneSync";
@@ -127,10 +127,24 @@ describe("RoomManager.setTrackBeatgrid / syncZones", () => {
   it("stamps a beatgrid onto every occurrence of the URL", () => {
     const room = createMapRoom();
     room.addTrackToContext("zoneB", { url: URL_A }); // same track in two zones
-    expect(room.setTrackBeatgrid(URL_A, HEAT3)).toBe(2);
+    // Stamps every occurrence: zoneA + zoneB + the Room Pool (main context),
+    // since addTrackToContext mirrors every zone track into the pool.
+    expect(room.setTrackBeatgrid(URL_A, HEAT3)).toBe(3);
     expect(room.getPlaylist("zoneA")!.tracks[0].beatgrid).toEqual(HEAT3);
     expect(room.getPlaylist("zoneB")!.tracks[1].beatgrid).toEqual(HEAT3);
+    expect(room.getPlaylist(MAIN_CONTEXT_ID)!.tracks.find((t) => t.url === URL_A)!.beatgrid).toEqual(HEAT3);
     expect(room.setTrackBeatgrid("https://example.com/nope.mp3", HEAT3)).toBe(0);
+  });
+
+  it("carries an existing beatgrid onto a track added to a zone from the pool", () => {
+    const room = new RoomManager("grid-inherit-room");
+    room.addPlaylist("zoneA", { loop: true });
+    // Track lives only in the pool with a beatgrid (imported before assignment).
+    room.addTrackToContext(MAIN_CONTEXT_ID, { url: URL_A });
+    expect(room.setTrackBeatgrid(URL_A, HEAT3)).toBe(1); // pool only, so far
+    // Assigning it to a zone should inherit the pool copy's grid.
+    room.addTrackToContext("zoneA", { url: URL_A });
+    expect(room.getPlaylist("zoneA")!.tracks.find((t) => t.url === URL_A)!.beatgrid).toEqual(HEAT3);
   });
 
   it("rejects sync when preconditions are unmet", () => {
