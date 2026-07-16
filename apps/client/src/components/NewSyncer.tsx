@@ -8,6 +8,7 @@ import dynamic from "next/dynamic";
 import { useEffect } from "react";
 import { IS_DEMO_MODE } from "@/lib/demo";
 import { Dashboard } from "./dashboard/Dashboard";
+import { DebugOverlay } from "./DebugOverlay";
 import { DemoDashboard } from "./dashboard/DemoDashboard";
 import { WebSocketManager } from "./room/WebSocketManager";
 
@@ -72,6 +73,9 @@ export const NewSyncer = ({ roomId, requestedRoomType }: NewSyncerProps) => {
       ) : (
         <Dashboard roomId={roomId} />
       )}
+
+      {/* Diagnostic overlay (renders nothing unless ?debug=1 in URL) */}
+      <DebugOverlay />
     </motion.div>
   );
 };
