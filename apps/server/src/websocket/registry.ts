@@ -17,19 +17,27 @@ import { handleSetGlobalVolume } from "@/websocket/handlers/setGlobalVolume";
 import { handleSetListeningSource } from "@/websocket/handlers/setListeningSource";
 import { handleStartSpatialAudio } from "@/websocket/handlers/startSpatialAudio";
 import { handleStopSpatialAudio } from "@/websocket/handlers/stopSpatialAudio";
-import { handleReorderAudioSources } from "@/websocket/handlers/handleReorderAudioSources";
 import { handleSetMetronome } from "@/websocket/handlers/setMetronome";
 import { handleSetLowPassFreq } from "@/websocket/handlers/setLowPassFreq";
 import { handleSetContextLoop } from "@/websocket/handlers/setContextLoop";
-import { handleAddTrackToContext, handleRemoveTrackFromContext } from "@/websocket/handlers/contextTracks";
+import {
+  handleAddTrackToContext,
+  handleImportTracksToContext,
+  handleRemoveTrackFromContext,
+  handleReorderTrackInContext,
+} from "@/websocket/handlers/contextTracks";
+import { handleSetRoomName } from "@/websocket/handlers/setRoomName";
+import { handleSetUsername } from "@/websocket/handlers/setUsername";
 import { handleSync } from "@/websocket/handlers/sync";
 import {
   handleAddShape,
   handleClearShapes,
   handleDeleteShape,
+  handleSetDefaultTileLayer,
   handleSetGeoPosition,
   handleSetMapMetadata,
   handleSetShapeFalloff,
+  handleSetShapeName,
   handleSetShapeGroup,
   handleSetVisibility,
   handleUpdateShape,
@@ -129,10 +137,6 @@ export const WS_REGISTRY: WebsocketRegistry = {
     handle: handleSendChatMessage,
     description: "Send a chat message to all clients in the room",
   },
-  [ClientActionEnum.enum.REORDER_AUDIO_SOURCES]: {
-    handle: handleReorderAudioSources,
-    description: "Reorder audio sources in the room queue",
-  },
   [ClientActionEnum.enum.SET_METRONOME]: {
     handle: handleSetMetronome,
     description: "Toggle metronome on/off for all clients in the room",
@@ -152,6 +156,14 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.REMOVE_TRACK_FROM_CONTEXT]: {
     handle: handleRemoveTrackFromContext,
     description: "Remove a track from a specific playlist context",
+  },
+  [ClientActionEnum.enum.REORDER_TRACK_IN_CONTEXT]: {
+    handle: handleReorderTrackInContext,
+    description: "Reorder the tracks within a specific playlist context",
+  },
+  [ClientActionEnum.enum.IMPORT_TRACKS_TO_CONTEXT]: {
+    handle: handleImportTracksToContext,
+    description: "Bulk-add tracks from an imported playlist file to a context",
   },
 
   // ── Map-room handlers ─────────────────────────────────────────────
@@ -175,6 +187,10 @@ export const WS_REGISTRY: WebsocketRegistry = {
     handle: handleSetShapeFalloff,
     description: "Set the edge-falloff distance (meters past the shape boundary at which gain hits 0)",
   },
+  [ClientActionEnum.enum.SET_SHAPE_NAME]: {
+    handle: handleSetShapeName,
+    description: "Set or clear a shape's display name (empty = 'Zone <id>')",
+  },
   [ClientActionEnum.enum.SET_SHAPE_GROUP]: {
     handle: handleSetShapeGroup,
     description: "Link/unlink a shape to a transport group",
@@ -182,6 +198,18 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.SET_MAP_METADATA]: {
     handle: handleSetMapMetadata,
     description: "Update the room's default Leaflet center/zoom",
+  },
+  [ClientActionEnum.enum.SET_ROOM_NAME]: {
+    handle: handleSetRoomName,
+    description: "Set or clear the room's display name (empty = use 'Room <id>')",
+  },
+  [ClientActionEnum.enum.SET_USERNAME]: {
+    handle: handleSetUsername,
+    description: "Update the caller's own display name",
+  },
+  [ClientActionEnum.enum.SET_DEFAULT_TILE_LAYER]: {
+    handle: handleSetDefaultTileLayer,
+    description: "Set the room-wide default base map / tile layer",
   },
   [ClientActionEnum.enum.SET_GEO_POSITION]: {
     handle: handleSetGeoPosition,

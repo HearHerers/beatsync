@@ -171,6 +171,21 @@ describe("RoomManager: per-context tracks", () => {
     expect(room.addTrackToContext("ghost", { url: "x.mp3" })).toBeUndefined();
   });
 
+  it("addTracksToContext appends in order, de-duping against existing + within the batch", () => {
+    room.addTrackToContext("s1", { url: "a.mp3" });
+    const tracks = room.addTracksToContext("s1", [
+      { url: "b.mp3" },
+      { url: "a.mp3" }, // already present → skipped
+      { url: "c.mp3" },
+      { url: "b.mp3" }, // duplicate within batch → skipped
+    ]);
+    expect(tracks).toEqual([{ url: "a.mp3" }, { url: "b.mp3" }, { url: "c.mp3" }]);
+  });
+
+  it("addTracksToContext returns undefined for unknown context", () => {
+    expect(room.addTracksToContext("ghost", [{ url: "x.mp3" }])).toBeUndefined();
+  });
+
   it("removeTrackFromContext filters out the URL and resets playback if currently playing", () => {
     room.addTrackToContext("s1", { url: "a.mp3" });
     room.addTrackToContext("s1", { url: "b.mp3" });
@@ -258,22 +273,26 @@ describe("RoomManager: map backup round-trip", () => {
     expect(backup.shapes).toBeUndefined();
   });
 
-  it("restoreMapState reconstructs roomType, mapMetadata, shapes from a backup", () => {
+  it("restoreMapState reconstructs roomType, mapMetadata, defaultTileLayerId, shapes from a backup", () => {
     const original = new RoomManager(ROOM_ID);
     original.setRoomType("map");
     original.setMapMetadata({ center: [1, 2], zoom: 10 });
+    original.setDefaultTileLayer("michigan");
     original.addShape(makeShape("s1", { falloffMeters: 100, groupId: "g1" }));
 
     const backup = original.createBackup();
+    expect(backup.defaultTileLayerId).toBe("michigan");
     const restored = new RoomManager(ROOM_ID);
     restored.restoreMapState({
       roomType: backup.roomType,
       mapMetadata: backup.mapMetadata,
+      defaultTileLayerId: backup.defaultTileLayerId,
       shapes: backup.shapes,
     });
 
     expect(restored.getRoomType()).toBe("map");
     expect(restored.getMapMetadata()).toEqual({ center: [1, 2], zoom: 10 });
+    expect(restored.getDefaultTileLayerId()).toBe("michigan");
     const restoredShape = restored.getShape("s1");
     expect(restoredShape?.falloffMeters).toBe(100);
     expect(restoredShape?.groupId).toBe("g1");

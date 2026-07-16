@@ -13,6 +13,7 @@ import {
   ChatMessageSchema,
   GeoPositionSchema,
   MapMetadataSchema,
+  MapTileLayerIdEnum,
   PositionSchema,
   RoomTypeEnum,
 } from "./basic";
@@ -106,12 +107,27 @@ const MapMetadataUpdateSchema = z.object({
 });
 export type MapMetadataUpdateType = z.infer<typeof MapMetadataUpdateSchema>;
 
+const RoomNameUpdateSchema = z.object({
+  type: z.literal("ROOM_NAME_UPDATE"),
+  /** Empty string clears the name (falls back to "Room <id>" client-side). */
+  roomName: z.string().max(80),
+});
+export type RoomNameUpdateType = z.infer<typeof RoomNameUpdateSchema>;
+/** Admin changed the room-wide default base map; all clients switch to it. */
+const DefaultTileLayerUpdateSchema = z.object({
+  type: z.literal("DEFAULT_TILE_LAYER_UPDATE"),
+  tileLayerId: MapTileLayerIdEnum,
+});
+export type DefaultTileLayerUpdateType = z.infer<typeof DefaultTileLayerUpdateSchema>;
+
 /** Sent on connect so the client knows whether to render the audio dashboard
- *  or the map shell. Carries map defaults if applicable. */
+ *  or the map shell. Carries map defaults and the room's display name if set. */
 const RoomTypeInfoSchema = z.object({
   type: z.literal("ROOM_TYPE_INFO"),
   roomType: RoomTypeEnum,
   mapMetadata: MapMetadataSchema.optional(),
+  roomName: z.string().optional(),
+  defaultTileLayerId: MapTileLayerIdEnum.optional(),
 });
 export type RoomTypeInfoType = z.infer<typeof RoomTypeInfoSchema>;
 
@@ -127,6 +143,8 @@ const RoomEventSchema = z.object({
     ContextLoopUpdateSchema,
     ShapesUpdateSchema,
     MapMetadataUpdateSchema,
+    RoomNameUpdateSchema,
+    DefaultTileLayerUpdateSchema,
     RoomTypeInfoSchema,
   ]),
 });

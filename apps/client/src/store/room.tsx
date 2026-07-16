@@ -1,5 +1,5 @@
 "use client";
-import type { MapMetadataType, RoomTypeValue } from "@beatsync/shared";
+import type { MapMetadataType, MapTileLayerId, RoomTypeValue } from "@beatsync/shared";
 import { create } from "zustand";
 
 // Interface for just the state values (without methods)
@@ -16,6 +16,12 @@ interface RoomStateValues {
   roomType?: RoomTypeValue;
   // Default Leaflet view for map rooms — server-driven via MAP_METADATA_UPDATE.
   mapMetadata?: MapMetadataType;
+  // Server-driven display name for the room. Empty/undefined means "no name set"
+  // and the UI falls back to "Room <id>".
+  roomName?: string;
+  // Admin-chosen room-wide default base map — server-driven via
+  // DEFAULT_TILE_LAYER_UPDATE. Undefined = clients use their build default.
+  defaultTileLayerId?: MapTileLayerId;
 }
 
 interface RoomState extends RoomStateValues {
@@ -25,6 +31,8 @@ interface RoomState extends RoomStateValues {
   setRequestedRoomType: (roomType: RoomTypeValue | undefined) => void;
   setRoomType: (roomType: RoomTypeValue) => void;
   setMapMetadata: (metadata: MapMetadataType) => void;
+  setRoomName: (name: string | undefined) => void;
+  setDefaultTileLayerId: (id: MapTileLayerId) => void;
   reset: () => void;
 }
 
@@ -36,6 +44,8 @@ const initialState: RoomStateValues = {
   requestedRoomType: undefined,
   roomType: undefined,
   mapMetadata: undefined,
+  roomName: undefined,
+  defaultTileLayerId: undefined,
 };
 
 export const useRoomStore = create<RoomState>()((set) => ({
@@ -49,6 +59,8 @@ export const useRoomStore = create<RoomState>()((set) => ({
   setRequestedRoomType: (requestedRoomType) => set({ requestedRoomType }),
   setRoomType: (roomType) => set({ roomType }),
   setMapMetadata: (mapMetadata) => set({ mapMetadata }),
+  setRoomName: (roomName) => set({ roomName: roomName && roomName.length > 0 ? roomName : undefined }),
+  setDefaultTileLayerId: (defaultTileLayerId) => set({ defaultTileLayerId }),
 
   // Reset to initial state
   reset: () =>

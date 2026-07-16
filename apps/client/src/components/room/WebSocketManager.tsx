@@ -1,4 +1,5 @@
 "use client";
+import { getAdminToken, setAdminToken } from "@/lib/adminToken";
 import { useClientId } from "@/hooks/useClientId";
 import { useNtpHeartbeat } from "@/hooks/useNtpHeartbeat";
 import { useWebSocketReconnection } from "@/hooks/useWebSocketReconnection";
@@ -100,9 +101,18 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
   const adminParam = adminSecret ? `&admin=${encodeURIComponent(adminSecret)}` : "";
   const creatorParam = creatorSecret ? `&creator=${encodeURIComponent(creatorSecret)}` : "";
   const roomTypeParam = requestedRoomType ? `&roomType=${encodeURIComponent(requestedRoomType)}` : "";
+  // Shared-link elevation: ?roomAdminToken= on the PAGE URL wins over
+  // localStorage so a fresh device can join as co-curator. We don't persist it
+  // here — if the server accepts it, it unicasts SET_ADMIN_TOKEN back and the
+  // handler below stores it, so a bogus URL token never pollutes localStorage.
+  const urlRoomAdminToken = searchParams?.get("roomAdminToken") ?? null;
 
   const createConnection = () => {
-    const SOCKET_URL = `${getWsUrl()}?roomId=${roomId}&username=${username}&clientId=${clientId}${adminParam}${creatorParam}${roomTypeParam}`;
+    // Re-read the room's admin token each connect — it may have just been issued
+    // (SET_ADMIN_TOKEN) so a reconnect re-presents it and keeps the curator admin.
+    const roomAdminToken = urlRoomAdminToken ?? (roomId ? getAdminToken(roomId) : null);
+    const adminTokenParam = roomAdminToken ? `&roomAdminToken=${encodeURIComponent(roomAdminToken)}` : "";
+    const SOCKET_URL = `${getWsUrl()}?roomId=${roomId}&username=${username}&clientId=${clientId}${adminParam}${creatorParam}${roomTypeParam}${adminTokenParam}`;
     console.log("Creating new WS connection to", SOCKET_URL);
 
     // Clear previous connection if it exists
@@ -179,6 +189,9 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
 
         // Mark that we received an NTP response (for staleness detection)
         markNTPResponseReceived();
+      } else if (response.type === "SET_ADMIN_TOKEN") {
+        // Persist the recoverable admin token so we re-present it on reconnect.
+        if (roomId) setAdminToken(roomId, response.token);
       } else if (response.type === "ROOM_EVENT") {
         const { event } = response;
         console.log("Room event:", event);
@@ -204,8 +217,14 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
           // Authoritative room-type info from the server. Wins over the URL hint.
           useRoomStore.getState().setRoomType(event.roomType);
           if (event.mapMetadata) useRoomStore.getState().setMapMetadata(event.mapMetadata);
+          useRoomStore.getState().setRoomName(event.roomName);
+          if (event.defaultTileLayerId) useRoomStore.getState().setDefaultTileLayerId(event.defaultTileLayerId);
         } else if (event.type === "MAP_METADATA_UPDATE") {
           useRoomStore.getState().setMapMetadata(event.metadata);
+        } else if (event.type === "ROOM_NAME_UPDATE") {
+          useRoomStore.getState().setRoomName(event.roomName);
+        } else if (event.type === "DEFAULT_TILE_LAYER_UPDATE") {
+          useRoomStore.getState().setDefaultTileLayerId(event.tileLayerId);
         } else if (event.type === "SHAPES_UPDATE") {
           useMapStore.getState().setShapes(event.shapes);
         } else if (event.type === "PLAYLISTS_UPDATE") {
@@ -213,6 +232,22 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
           // reads via the existing audioSources/playbackState path; map-room
           // UI (and any future multi-context UI) reads per-context tracks from
           // state.playlists.
+          //
+          // Before swapping in the new snapshot, find any context whose
+          // playback transitioned from playing → paused (e.g. server-side
+          // REMOVE_TRACK_FROM_CONTEXT cleared the playing track) and stop the
+          // matching mapAudio chain. Without this, removing the playing track
+          // leaves the source node running locally even though the UI shows
+          // paused.
+          const previousPlaylists = useGlobalStore.getState().playlists;
+          for (const incoming of event.playlists) {
+            const prev = previousPlaylists.get(incoming.id);
+            const wasPlaying = prev?.playbackState.type === "playing";
+            const nowPaused = incoming.playbackState.type !== "playing";
+            if (wasPlaying && nowPaused) {
+              mapAudio.pauseShape(incoming.id);
+            }
+          }
           useGlobalStore.getState().setPlaylists(event.playlists);
         } else if (event.type === "CONTEXT_LOOP_UPDATE") {
           useGlobalStore.getState().setContextLoop(event.contextId, event.loop);
@@ -351,9 +386,15 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
       stopHeartbeat();
       ws.close();
     };
-    // Not including socket in the dependency array because it will trigger the close when it's set
+    // Not including socket in the dependency array because it will trigger the close when it's set.
+    // Deliberately NOT including `username` either: an in-room rename (SET_USERNAME) updates
+    // useRoomStore.username, and if that were a dependency this effect's cleanup would tear down
+    // the live socket — killing the connection before the server's CLIENT_CHANGE broadcast arrives,
+    // so the rename would never visually apply. username is only read when building the initial
+    // join URL (the connect is gated by roomId/isLoadingRoom, which settle after username is set),
+    // and the server persists renames across reconnects, so a live change must not reconnect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoadingRoom, roomId, username, clientId]);
+  }, [isLoadingRoom, roomId, clientId]);
 
   return null; // This is a non-visual component
 };

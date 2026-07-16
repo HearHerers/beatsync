@@ -1,7 +1,8 @@
 import pLimit from "p-limit";
+import { isTombstonedAt, loadRegistry } from "@/admin/registry";
 import {
-  cleanupOrphanedRooms,
   deleteObject,
+  deleteObjectsWithPrefix,
   downloadJSON,
   getLatestFileWithPrefix,
   getSortedFilesWithPrefix,
@@ -60,10 +61,15 @@ export class BackupManager {
 
       room.restorePlaylists(restoredPlaylists);
       room.restoreClientData(roomData.clientDatas);
-      if (roomData.roomType || roomData.mapMetadata || roomData.shapes) {
+      if (roomData.roomName) {
+        room.setRoomName(roomData.roomName);
+      }
+      if (roomData.adminToken) room.restoreAdminToken(roomData.adminToken);
+      if (roomData.roomType || roomData.mapMetadata || roomData.defaultTileLayerId || roomData.shapes) {
         room.restoreMapState({
           roomType: roomData.roomType,
           mapMetadata: roomData.mapMetadata,
+          defaultTileLayerId: roomData.defaultTileLayerId,
           shapes: roomData.shapes,
         });
       }
@@ -73,8 +79,10 @@ export class BackupManager {
         console.log(`Room ${roomId}: Restored ${roomData.chat.messages.length} chat messages`);
       }
 
-      // Always schedule cleanup on restoration because we don't know if any clients will reconnect.
-      globalManager.scheduleRoomCleanup(roomId);
+      if (roomData.archived) room.setArchived(true);
+
+      // Rooms are permanent (non-demo): keep restored rooms resident even with no
+      // clients. We do NOT schedule cleanup here — deletion is explicit only.
       const totalTracks = restoredPlaylists.reduce((n, p) => n + p.tracks.length, 0);
       return {
         room: {
@@ -160,10 +168,9 @@ export class BackupManager {
 
       if (!latestBackupKey) {
         console.log("📭 No backups found");
-
-        // Still clean up orphaned rooms even if no backup exists
-        await this.cleanupOrphanedRooms();
-
+        // No automatic orphan deletion: room audio is permanent. There is
+        // currently no deletion path; the operator API (OPERATOR_ROOM_MANAGEMENT.md)
+        // will add an explicit, tombstoned one.
         return false;
       }
 
@@ -185,11 +192,23 @@ export class BackupManager {
 
       const backupData = parseResult.data;
 
+      // Tombstone guard: skip rooms the operator hard-deleted after this backup
+      // was written (and self-heal any R2 audio the delete left behind). A room
+      // re-created after its deletion has a newer backup timestamp and restores
+      // normally.
+      await loadRegistry();
+      const roomEntries = Object.entries(backupData.data.rooms).filter(([roomId]) => {
+        if (!isTombstonedAt(roomId, backupData.timestamp)) return true;
+        console.log(`🪦 Skipping tombstoned room ${roomId} (deleted after this backup was written)`);
+        deleteObjectsWithPrefix(`room-${roomId}`).catch((error) => {
+          console.error(`Failed to self-heal R2 audio for tombstoned room ${roomId}:`, error);
+        });
+        return false;
+      });
+
       // Get configurable concurrency limit
       const concurrency = this.DEFAULT_RESTORE_CONCURRENCY;
       const limit = pLimit(concurrency);
-
-      const roomEntries = Object.entries(backupData.data.rooms);
       console.log(`🔄 Restoring ${roomEntries.length} rooms with concurrency limit of ${concurrency}...`);
 
       // Process rooms in parallel with concurrency control using p-limit
@@ -238,9 +257,9 @@ export class BackupManager {
         });
       }
 
-      // Clean up orphaned rooms after state restore
-      await this.cleanupOrphanedRooms();
-
+      // No automatic orphan deletion after restore: room audio is permanent.
+      // There is currently no deletion path; the operator API
+      // (OPERATOR_ROOM_MANAGEMENT.md) will add an explicit, tombstoned one.
       return true;
     } catch (error) {
       console.error("❌ State restore failed:", error);
@@ -277,21 +296,6 @@ export class BackupManager {
     } catch (error) {
       // Don't throw - cleanup failures shouldn't break the backup process
       console.error("⚠️ Backup cleanup failed (non-critical):", error);
-    }
-  }
-
-  /**
-   * Clean up orphaned rooms that exist in R2 but not in server memory
-   */
-  static async cleanupOrphanedRooms(): Promise<void> {
-    try {
-      console.log("🧹 Cleaning up orphaned rooms...");
-
-      const activeRooms = new Set<string>(globalManager.getRoomIds());
-      await cleanupOrphanedRooms(activeRooms, true);
-    } catch (error) {
-      // Don't throw - cleanup failures shouldn't break the restore process
-      console.error("⚠️ Orphaned room cleanup failed:", error);
     }
   }
 }

@@ -35,14 +35,17 @@ import {
   handleAddShape,
   handleClearShapes,
   handleDeleteShape,
+  handleSetDefaultTileLayer,
   handleSetGeoPosition,
   handleSetMapMetadata,
   handleSetShapeFalloff,
+  handleSetShapeName,
   handleSetShapeGroup,
   handleSetVisibility,
   handleUpdateShape,
 } from "@/websocket/handlers/mapHandlers";
 import { handleAddTrackToContext, handleRemoveTrackFromContext } from "@/websocket/handlers/contextTracks";
+import { handleDeleteAudioSources } from "@/websocket/handlers/handleDeleteAudioSources";
 
 const ROOM_ID = "map-handlers-test";
 
@@ -216,6 +219,50 @@ describe("handleSetShapeFalloff / handleSetShapeGroup", () => {
   });
 });
 
+describe("handleSetShapeName", () => {
+  it("sets the name and broadcasts SHAPES_UPDATE", () => {
+    const { room, adminWs, server } = freshMapRoom();
+    room.addShape(makeShape("s1"));
+    broadcasts = [];
+    void handleSetShapeName({
+      ws: adminWs,
+      message: { type: "SET_SHAPE_NAME", shapeId: "s1", name: "Stage" },
+      server,
+    });
+    const ev = lastEventOfType("SHAPES_UPDATE");
+    if (ev.type !== "SHAPES_UPDATE") throw new Error("unreachable");
+    expect(ev.shapes[0].name).toBe("Stage");
+    expect(room.getShape("s1")?.name).toBe("Stage");
+  });
+
+  it("clears the name when given empty string", () => {
+    const { room, adminWs, server } = freshMapRoom();
+    room.addShape(makeShape("s1"));
+    room.setShapeName("s1", "Pre-existing");
+    broadcasts = [];
+    void handleSetShapeName({
+      ws: adminWs,
+      message: { type: "SET_SHAPE_NAME", shapeId: "s1", name: "" },
+      server,
+    });
+    expect(room.getShape("s1")?.name).toBeUndefined();
+  });
+
+  it("trims whitespace and truncates to 80 chars", () => {
+    const { room } = freshMapRoom();
+    room.addShape(makeShape("s1"));
+    room.setShapeName("s1", "  Stage  ");
+    expect(room.getShape("s1")?.name).toBe("Stage");
+    room.setShapeName("s1", "x".repeat(200));
+    expect(room.getShape("s1")?.name?.length).toBe(80);
+  });
+
+  it("no-op when shape doesn't exist", () => {
+    const { room } = freshMapRoom();
+    expect(room.setShapeName("ghost", "Stage")).toBe(false);
+  });
+});
+
 describe("handleSetMapMetadata", () => {
   it("updates state and broadcasts MAP_METADATA_UPDATE", () => {
     const { room, adminWs, server } = freshMapRoom();
@@ -228,6 +275,36 @@ describe("handleSetMapMetadata", () => {
     if (ev.type !== "MAP_METADATA_UPDATE") throw new Error("unreachable");
     expect(ev.metadata).toEqual({ center: [10, 20], zoom: 15 });
     expect(room.getMapMetadata()).toEqual({ center: [10, 20], zoom: 15 });
+  });
+});
+
+describe("handleSetDefaultTileLayer", () => {
+  it("updates state and broadcasts DEFAULT_TILE_LAYER_UPDATE", () => {
+    const { room, adminWs, server } = freshMapRoom();
+    void handleSetDefaultTileLayer({
+      ws: adminWs,
+      message: { type: "SET_DEFAULT_TILE_LAYER", tileLayerId: "michigan" },
+      server,
+    });
+    const ev = lastEventOfType("DEFAULT_TILE_LAYER_UPDATE");
+    if (ev.type !== "DEFAULT_TILE_LAYER_UPDATE") throw new Error("unreachable");
+    expect(ev.tileLayerId).toBe("michigan");
+    expect(room.getDefaultTileLayerId()).toBe("michigan");
+  });
+
+  it("rejects non-admin in ADMIN_ONLY rooms with no broadcast", () => {
+    const { room, server } = freshMapRoom();
+    const visitorWs = createMockWs({ clientId: "visitor-1", roomId: room.getRoomId() });
+    room.addClient(visitorWs);
+    expect(() =>
+      handleSetDefaultTileLayer({
+        ws: visitorWs,
+        message: { type: "SET_DEFAULT_TILE_LAYER", tileLayerId: "street" },
+        server,
+      })
+    ).toThrow(/permission/);
+    expect(broadcasts).toHaveLength(0);
+    expect(room.getDefaultTileLayerId()).toBeUndefined();
   });
 });
 
@@ -300,6 +377,58 @@ describe("contextTracks handlers", () => {
     const ev = lastEventOfType("PLAYLISTS_UPDATE");
     if (ev.type !== "PLAYLISTS_UPDATE") throw new Error("unreachable");
     expect(ev.playlists.find((p) => p.id === "s1")?.tracks).toEqual([{ url: "b.mp3" }]);
+    // Nothing was playing, so no pause should be scheduled.
+    expect(broadcasts.some((b) => b.message.type === "SCHEDULED_ACTION")).toBe(false);
+  });
+
+  it("REMOVE_TRACK_FROM_CONTEXT of the playing track schedules a PAUSE for everyone", () => {
+    const { room, adminWs, server } = freshMapRoom();
+    room.addShape(makeShape("s1"));
+    room.addTrackToContext("s1", { url: "a.mp3" });
+    room.addTrackToContext("s1", { url: "b.mp3" });
+    room.updatePlaybackSchedulePlay(
+      { type: "PLAY", audioSource: "a.mp3", trackTimeSeconds: 0, contextId: "s1" },
+      Date.now()
+    );
+    broadcasts = [];
+    void handleRemoveTrackFromContext({
+      ws: adminWs,
+      message: { type: "REMOVE_TRACK_FROM_CONTEXT", contextId: "s1", url: "a.mp3" },
+      server,
+    });
+
+    const pause = broadcasts.find((b) => b.message.type === "SCHEDULED_ACTION");
+    if (pause?.message.type !== "SCHEDULED_ACTION") throw new Error("expected a scheduled PAUSE broadcast");
+    expect(pause.message.scheduledAction).toMatchObject({ type: "PAUSE", contextId: "s1" });
+
+    // Playlist snapshot reflects the removal + paused state.
+    const ev = lastEventOfType("PLAYLISTS_UPDATE");
+    if (ev.type !== "PLAYLISTS_UPDATE") throw new Error("unreachable");
+    const playlist = ev.playlists.find((p) => p.id === "s1");
+    expect(playlist?.tracks).toEqual([{ url: "b.mp3" }]);
+    expect(playlist?.playbackState.type).toBe("paused");
+  });
+
+  it("REMOVE_TRACK_FROM_CONTEXT of a non-playing track does not schedule a PAUSE", () => {
+    const { room, adminWs, server } = freshMapRoom();
+    room.addShape(makeShape("s1"));
+    room.addTrackToContext("s1", { url: "a.mp3" });
+    room.addTrackToContext("s1", { url: "b.mp3" });
+    room.updatePlaybackSchedulePlay(
+      { type: "PLAY", audioSource: "a.mp3", trackTimeSeconds: 0, contextId: "s1" },
+      Date.now()
+    );
+    broadcasts = [];
+    void handleRemoveTrackFromContext({
+      ws: adminWs,
+      message: { type: "REMOVE_TRACK_FROM_CONTEXT", contextId: "s1", url: "b.mp3" },
+      server,
+    });
+    expect(broadcasts.some((b) => b.message.type === "SCHEDULED_ACTION")).toBe(false);
+    // Playback of the untouched track continues.
+    const ev = lastEventOfType("PLAYLISTS_UPDATE");
+    if (ev.type !== "PLAYLISTS_UPDATE") throw new Error("unreachable");
+    expect(ev.playlists.find((p) => p.id === "s1")?.playbackState.type).toBe("playing");
   });
 
   it("ADD_TRACK_TO_CONTEXT with missing contextId routes to 'main'", () => {
@@ -329,5 +458,40 @@ describe("contextTracks handlers", () => {
       })
     ).toThrow(/permission/);
     expect(broadcasts).toHaveLength(0);
+  });
+});
+
+describe("handleDeleteAudioSources (main queue)", () => {
+  it("deleting the playing track schedules a PAUSE for everyone", async () => {
+    const { room, adminWs, server } = freshMapRoom();
+    room.addAudioSource({ url: "a.mp3" });
+    room.addAudioSource({ url: "b.mp3" });
+    room.updatePlaybackSchedulePlay({ type: "PLAY", audioSource: "a.mp3", trackTimeSeconds: 0 }, Date.now());
+    broadcasts = [];
+    await handleDeleteAudioSources({
+      ws: adminWs,
+      message: { type: "DELETE_AUDIO_SOURCES", urls: ["a.mp3"] },
+      server,
+    });
+
+    const pause = broadcasts.find((b) => b.message.type === "SCHEDULED_ACTION");
+    if (pause?.message.type !== "SCHEDULED_ACTION") throw new Error("expected a scheduled PAUSE broadcast");
+    expect(pause.message.scheduledAction.type).toBe("PAUSE");
+    // Main context: no contextId so audio-room clients take the schedulePause path.
+    expect("contextId" in pause.message.scheduledAction && pause.message.scheduledAction.contextId).toBeFalsy();
+  });
+
+  it("deleting a non-playing track does not schedule a PAUSE", async () => {
+    const { room, adminWs, server } = freshMapRoom();
+    room.addAudioSource({ url: "a.mp3" });
+    room.addAudioSource({ url: "b.mp3" });
+    room.updatePlaybackSchedulePlay({ type: "PLAY", audioSource: "a.mp3", trackTimeSeconds: 0 }, Date.now());
+    broadcasts = [];
+    await handleDeleteAudioSources({
+      ws: adminWs,
+      message: { type: "DELETE_AUDIO_SOURCES", urls: ["b.mp3"] },
+      server,
+    });
+    expect(broadcasts.some((b) => b.message.type === "SCHEDULED_ACTION")).toBe(false);
   });
 });

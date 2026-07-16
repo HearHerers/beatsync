@@ -87,6 +87,17 @@ export const handleSetShapeFalloff: HandlerFunction<ExtractWSRequestFrom["SET_SH
   broadcastShapes(room, server);
 };
 
+export const handleSetShapeName: HandlerFunction<ExtractWSRequestFrom["SET_SHAPE_NAME"]> = ({
+  ws,
+  message,
+  server,
+}) => {
+  const { room } = requireCanMutate(ws);
+  if (!room.isMapRoom()) return;
+  if (!room.setShapeName(message.shapeId, message.name)) return;
+  broadcastShapes(room, server);
+};
+
 export const handleSetShapeGroup: HandlerFunction<ExtractWSRequestFrom["SET_SHAPE_GROUP"]> = ({
   ws,
   message,
@@ -114,6 +125,24 @@ export const handleSetMapMetadata: HandlerFunction<ExtractWSRequestFrom["SET_MAP
     message: {
       type: "ROOM_EVENT",
       event: { type: "MAP_METADATA_UPDATE", metadata: message.metadata },
+    },
+  });
+};
+
+export const handleSetDefaultTileLayer: HandlerFunction<ExtractWSRequestFrom["SET_DEFAULT_TILE_LAYER"]> = ({
+  ws,
+  message,
+  server,
+}) => {
+  const { room } = requireCanMutate(ws);
+  if (!room.isMapRoom()) return;
+  room.setDefaultTileLayer(message.tileLayerId);
+  sendBroadcast({
+    server,
+    roomId: room.getRoomId(),
+    message: {
+      type: "ROOM_EVENT",
+      event: { type: "DEFAULT_TILE_LAYER_UPDATE", tileLayerId: message.tileLayerId },
     },
   });
 };

@@ -1,4 +1,5 @@
 import { DEMO_ROOM_ID, IS_DEMO_MODE, isValidAdminSecret } from "@/demo";
+import { globalManager } from "@/managers";
 import { errorResponse } from "@/utils/responses";
 import type { BunServer, WSData } from "@/utils/websocket";
 import { RoomTypeEnum } from "@beatsync/shared";
@@ -12,6 +13,7 @@ export const handleWebSocketUpgrade = (req: Request, server: BunServer) => {
   const clientId = url.searchParams.get("clientId");
   const adminSecret = url.searchParams.get("admin");
   const creatorSecret = url.searchParams.get("creator");
+  const roomAdminToken = url.searchParams.get("roomAdminToken") ?? undefined;
   const roomTypeParam = url.searchParams.get("roomType");
   // Map rooms are opt-in via ?roomType=map. Unrecognized values are ignored so the
   // first client falls back to the default "audio" type.
@@ -35,6 +37,12 @@ export const handleWebSocketUpgrade = (req: Request, server: BunServer) => {
     return errorResponse(`Only room ${DEMO_ROOM_ID} is available in demo mode`);
   }
 
+  // Operator-archived rooms reject new joins until unarchived.
+  if (globalManager.getRoom(roomId)?.isArchived()) {
+    console.log(`Rejected join to archived room ${roomId}`);
+    return errorResponse("This room has been archived by the operator", 403);
+  }
+
   // Check if client provided valid admin secret
   const isAdmin = IS_DEMO_MODE && isValidAdminSecret(adminSecret);
 
@@ -49,6 +57,7 @@ export const handleWebSocketUpgrade = (req: Request, server: BunServer) => {
     clientId,
     isAdmin,
     isCreator,
+    roomAdminToken,
     requestedRoomType,
   };
 

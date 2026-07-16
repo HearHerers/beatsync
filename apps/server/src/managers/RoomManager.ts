@@ -14,6 +14,7 @@ import type {
   DiscoveryRoomType,
   GeoPositionType,
   MapMetadataType,
+  MapTileLayerId,
   PauseActionType,
   PlayActionType,
   PlaybackControlsPermissionsEnum,
@@ -32,6 +33,7 @@ import {
   LOW_PASS_CONSTANTS,
   MAIN_CONTEXT_ID,
   MapMetadataSchema,
+  MapTileLayerIdEnum,
   NTP_CONSTANTS,
   PlaylistPlaybackStateSchema,
   RoomTypeEnum,
@@ -94,10 +96,18 @@ const RoomBackupSchema = z.object({
     .optional(),
   /** Per-context playlist state — single source of truth for room audio. */
   playlists: z.array(PlaylistBackupSchema),
+  /** Display name for the room, set by an admin. Audio rooms and map rooms both
+   *  use it — UI falls back to "Room <id>" when unset. */
+  roomName: z.string().optional(),
   /** Map-room state. Only meaningful when roomType === "map". */
   roomType: RoomTypeEnum.optional(),
   mapMetadata: MapMetadataSchema.optional(),
+  defaultTileLayerId: MapTileLayerIdEnum.optional(),
   shapes: z.array(ShapeSchema).optional(),
+  /** Recoverable per-room admin token (non-demo). */
+  adminToken: z.string().optional(),
+  /** Operator soft-delete: hidden from discovery, joins rejected, R2 audio kept. */
+  archived: z.boolean().optional(),
 });
 export type RoomBackupType = z.infer<typeof RoomBackupSchema>;
 
@@ -210,6 +220,10 @@ export class RoomManager {
   private heartbeatCheckInterval?: NodeJS.Timeout;
   private onClientCountChange?: () => void;
   private playbackControlsPermissions: PlaybackControlsPermissionsType = "ADMIN_ONLY";
+  // Recoverable per-room admin token (non-demo). Minted the first time the room
+  // gets a client; the creator is granted admin and handed this token. Anyone
+  // presenting it later becomes a co-curator. Persisted in backups.
+  private adminToken?: string;
   private globalVolume = 1.0;
   private lowPassFreq: number = LOW_PASS_CONSTANTS.MAX_FREQ; // Default bypassed (full spectrum)
   private isMetronomeEnabled = false;
@@ -220,13 +234,21 @@ export class RoomManager {
 
   private demoAudioReadyClients = new Set<string>();
 
-  // Map-room state. roomType is fixed for the room's lifetime (set by the first
-  // connecting client via the WS upgrade ?roomType query param). When 'audio',
+  // Map-room state. roomType is fixed for the room's lifetime (set by the client
+  // that creates the room via the WS upgrade ?roomType query param). When 'audio',
   // shape methods refuse to mutate. When 'map', shapes is the authoritative
   // geometry registry — each shape has a corresponding playlist context with
   // id = shape.id (the playlist holds its tracks + playback state).
   private roomType: RoomTypeValue = "audio";
   private mapMetadata?: MapMetadataType;
+  private roomName?: string;
+  // Operator soft-delete (see routes/admin.ts). Persisted in the room backup;
+  // an archived room stays resident with its R2 audio but is hidden from
+  // discovery and rejects new WS joins until unarchived.
+  private archived = false;
+  // Admin-chosen room-wide default base map. Undefined = clients use their
+  // build default (Mapbox if a token is set, else Esri).
+  private defaultTileLayerId?: MapTileLayerId;
   private readonly shapes = new Map<string, ShapeType>();
 
   constructor(
@@ -486,17 +508,25 @@ export class RoomManager {
       clientData.nudgeMs = cachedClient.nudgeMs;
     }
 
-    // In demo mode, only the admin secret grants admin. Otherwise, the first
-    // client to ever join the room gets admin. We check clientData (not
-    // wsConnections) so that a new joiner doesn't get promoted just because the
-    // original admin disconnected — cached admin data is preserved for rejoin,
-    // and removeClient handles auto-promotion when an admin leaves with others
-    // still present.
-    if (!IS_DEMO_MODE && this.clientData.size === 0) {
-      clientData.isAdmin = true;
+    // Admin model (non-demo): admin is a recoverable per-room token, NOT
+    // first-joiner-wins. Mint the token the first time the room is used; the
+    // very first connector is the creator and gets admin. Anyone presenting the
+    // matching token thereafter is granted admin (co-curator). Cached admin
+    // (same clientId rejoining) is already restored above. Rooms are permanent,
+    // so a token, once minted, persists — "first connector" can't be hijacked
+    // by a later visitor after the room is recreated, because it never is.
+    if (!IS_DEMO_MODE) {
+      const isFirstEverConnector = this.clientData.size === 0;
+      if (!this.adminToken) {
+        this.adminToken = crypto.randomUUID();
+        if (isFirstEverConnector) clientData.isAdmin = true;
+      }
+      if (ws.data.roomAdminToken && ws.data.roomAdminToken === this.adminToken) {
+        clientData.isAdmin = true;
+      }
     }
 
-    // If the client authenticated with the admin secret or is the creator, always grant admin
+    // If the client authenticated with the demo admin secret or is the creator, always grant admin
     if (ws.data.isAdmin || ws.data.isCreator) {
       clientData.isAdmin = true;
     }
@@ -526,27 +556,11 @@ export class RoomManager {
     const activeClients = this.getClients();
     // Reposition remaining clients if any
     if (activeClients.length > 0) {
-      // Always check to ensure there is at least one admin
       positionClientsInCircle(activeClients);
-
-      // Check if any admins remain after removing this client
-      // In demo mode, skip auto-promotion — only the admin secret grants admin
-      if (!IS_DEMO_MODE) {
-        const remainingAdmins = activeClients.filter((client) => client.isAdmin);
-
-        if (remainingAdmins.length === 0) {
-          const randomIndex = Math.floor(Math.random() * activeClients.length);
-          const newAdmin = activeClients[randomIndex];
-
-          if (newAdmin) {
-            newAdmin.isAdmin = true;
-            this.clientData.set(newAdmin.clientId, newAdmin);
-            console.log(
-              `✨ Automatically promoted ${newAdmin.username} (${newAdmin.clientId}) to admin in room ${this.roomId}`
-            );
-          }
-        }
-      }
+      // NOTE: no random admin auto-promotion. Admin is a recoverable per-room
+      // token (see addClient); a curated room must never hand control to a
+      // random visitor just because the curator's tab dropped. The curator
+      // reclaims admin via their cached clientId or the room's admin token.
     } else {
       // Stop heartbeat checking if no clients remain
       this.stopHeartbeatChecking();
@@ -1161,20 +1175,71 @@ export class RoomManager {
         loop: p.loop,
         playbackState: { ...p.playback },
       })),
+      ...(this.roomName && { roomName: this.roomName }),
       ...(this.roomType !== "audio" && { roomType: this.roomType }),
       ...(this.mapMetadata && { mapMetadata: this.mapMetadata }),
+      ...(this.defaultTileLayerId && { defaultTileLayerId: this.defaultTileLayerId }),
       ...(this.shapes.size > 0 && { shapes: Array.from(this.shapes.values()) }),
+      ...(this.adminToken && { adminToken: this.adminToken }),
+      ...(this.archived && { archived: true }),
     };
   }
 
+  /** Restore the recoverable admin token from a backup (non-demo rooms). */
+  restoreAdminToken(token: string): void {
+    this.adminToken = token;
+  }
+
+  /** The room's admin token, if minted. Used by the recovery script + connect unicast. */
+  getAdminToken(): string | undefined {
+    return this.adminToken;
+  }
+
   /** Restore map-room state from a backup. */
-  restoreMapState(backup: { roomType?: RoomTypeValue; mapMetadata?: MapMetadataType; shapes?: ShapeType[] }): void {
+  restoreMapState(backup: {
+    roomType?: RoomTypeValue;
+    mapMetadata?: MapMetadataType;
+    defaultTileLayerId?: MapTileLayerId;
+    shapes?: ShapeType[];
+  }): void {
     if (backup.roomType) this.roomType = backup.roomType;
     if (backup.mapMetadata) this.mapMetadata = backup.mapMetadata;
+    if (backup.defaultTileLayerId) this.defaultTileLayerId = backup.defaultTileLayerId;
     if (backup.shapes) {
       this.shapes.clear();
       for (const s of backup.shapes) this.shapes.set(s.id, s);
     }
+  }
+
+  /** Operator soft-delete flag (persisted via createBackup / restore). */
+  isArchived(): boolean {
+    return this.archived;
+  }
+  setArchived(archived: boolean): void {
+    this.archived = archived;
+  }
+
+  /**
+   * Close every live WebSocket in the room (operator archive/delete). The
+   * close handlers take care of client removal and last-disconnect logic.
+   */
+  evictAllClients(reason: string): void {
+    for (const ws of this.wsConnections.values()) {
+      try {
+        ws.close(1000, reason);
+      } catch {
+        // socket already closing/closed — removeClient will still run
+      }
+    }
+  }
+
+  /** Display name for the room. Empty string clears it (UI falls back to "Room <id>"). */
+  getRoomName(): string | undefined {
+    return this.roomName;
+  }
+  setRoomName(name: string): void {
+    const trimmed = name.trim().slice(0, 80);
+    this.roomName = trimmed.length === 0 ? undefined : trimmed;
   }
 
   /**
@@ -1380,15 +1445,6 @@ export class RoomManager {
     }
   }
 
-  reorderAudioSource(newOrder: AudioSourceType[]): void | Error {
-    if (newOrder.length !== this.audioSources.length) {
-      console.warn(`Attempted to reorder audio sources with mismatched length in room ${this.roomId}`);
-      return new Error(`Mismatched audio sources length`);
-    }
-
-    this.audioSources = newOrder;
-  }
-
   // ── Per-context playlist API ────────────────────────────────────────
   //
   // The methods above all operate on the "main" context implicitly via the
@@ -1459,6 +1515,28 @@ export class RoomManager {
   }
 
   /**
+   * Append multiple tracks to a context in order, de-duplicating by URL against
+   * both the existing playlist and earlier entries in the same batch. Used by
+   * playlist import. Returns the updated tracks, or undefined if the playlist
+   * doesn't exist.
+   */
+  addTracksToContext(contextId: string, sources: AudioSourceType[]): AudioSourceType[] | undefined {
+    const playlist = this.playlists.get(contextId);
+    if (!playlist) return undefined;
+    const seen = new Set(playlist.tracks.map((t) => t.url));
+    const additions: AudioSourceType[] = [];
+    for (const source of sources) {
+      if (seen.has(source.url)) continue;
+      seen.add(source.url);
+      additions.push(source);
+    }
+    if (additions.length > 0) {
+      playlist.tracks = [...playlist.tracks, ...additions];
+    }
+    return playlist.tracks;
+  }
+
+  /**
    * Remove a track from a specific context's playlist. If the removed track was
    * currently playing, the playback resets to paused. Returns { tracks,
    * removedCurrent } or undefined if the playlist is missing.
@@ -1475,6 +1553,39 @@ export class RoomManager {
       playlist.playback = { ...INITIAL_PLAYLIST_PLAYBACK };
     }
     return { tracks: playlist.tracks, removedCurrent: removingCurrent };
+  }
+
+  /**
+   * Reorder a context's playlist to match `orderedUrls`. `orderedUrls` must be a
+   * permutation of the playlist's current track URLs — same length and same set;
+   * otherwise the order is stale (e.g. a concurrent add/remove) and is rejected
+   * so the client can resync from the authoritative snapshot. The existing source
+   * objects are reused, so S3/Navidrome metadata is preserved. Playback is keyed
+   * by URL (not index), so reordering a playing playlist is safe and leaves the
+   * current track untouched. Returns the reordered tracks, undefined if the
+   * playlist doesn't exist, or an Error if `orderedUrls` isn't a permutation.
+   */
+  reorderTrackInContext(contextId: string, orderedUrls: string[]): AudioSourceType[] | Error | undefined {
+    const playlist = this.playlists.get(contextId);
+    if (!playlist) return undefined;
+
+    const byUrl = new Map(playlist.tracks.map((t) => [t.url, t]));
+    if (orderedUrls.length !== playlist.tracks.length) {
+      return new Error(`Reorder length mismatch for context ${contextId} in room ${this.roomId}`);
+    }
+    const reordered: AudioSourceType[] = [];
+    const seen = new Set<string>();
+    for (const url of orderedUrls) {
+      const source = byUrl.get(url);
+      if (!source || seen.has(url)) {
+        return new Error(`Reorder is not a permutation of context ${contextId} tracks in room ${this.roomId}`);
+      }
+      seen.add(url);
+      reordered.push(source);
+    }
+
+    playlist.tracks = reordered;
+    return reordered;
   }
 
   /**
@@ -1504,9 +1615,9 @@ export class RoomManager {
   }
 
   /**
-   * Set the room's type. The first client to connect wins; subsequent attempts
-   * to change the type after clients have joined throw. Idempotent for same-
-   * value sets.
+   * Set the room's type. Only meant for brand-new rooms (the creating client
+   * wins — see handleOpen); attempts to change the type while clients are
+   * connected throw. Idempotent for same-value sets.
    */
   setRoomType(roomType: RoomTypeValue): void {
     if (this.roomType === roomType) return;
@@ -1524,6 +1635,14 @@ export class RoomManager {
 
   setMapMetadata(metadata: MapMetadataType): void {
     this.mapMetadata = metadata;
+  }
+
+  getDefaultTileLayerId(): MapTileLayerId | undefined {
+    return this.defaultTileLayerId;
+  }
+
+  setDefaultTileLayer(tileLayerId: MapTileLayerId): void {
+    this.defaultTileLayerId = tileLayerId;
   }
 
   /** All currently-registered shapes (geometry only). */
@@ -1580,6 +1699,24 @@ export class RoomManager {
     return true;
   }
 
+  /**
+   * Set a shape's display name. Empty string clears it (UI falls back to
+   * "Zone <id>"). Returns false if the shape doesn't exist.
+   */
+  setShapeName(shapeId: string, name: string): boolean {
+    const existing = this.shapes.get(shapeId);
+    if (!existing) return false;
+    const trimmed = name.trim().slice(0, 80);
+    const next = { ...existing };
+    if (trimmed.length === 0) {
+      delete next.name;
+    } else {
+      next.name = trimmed;
+    }
+    this.shapes.set(shapeId, next);
+    return true;
+  }
+
   setShapeGroup(shapeId: string, groupId: string | null): boolean {
     const existing = this.shapes.get(shapeId);
     if (!existing) return false;
@@ -1600,6 +1737,18 @@ export class RoomManager {
     const client = this.clientData.get(clientId);
     if (!client) return false;
     client.isHidden = isHidden;
+    this.clientData.set(clientId, client);
+    return true;
+  }
+
+  /** Update a client's display name. Trimmed + length-capped. Returns false on
+   *  unknown client or empty result. */
+  setClientUsername(clientId: string, username: string): boolean {
+    const client = this.clientData.get(clientId);
+    if (!client) return false;
+    const trimmed = username.trim().slice(0, 40);
+    if (trimmed.length === 0) return false;
+    client.username = trimmed;
     this.clientData.set(clientId, client);
     return true;
   }
