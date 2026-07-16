@@ -36,6 +36,7 @@ import { Download, Repeat, Trash2, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { RoomPoolList } from "./RoomPoolList";
+import { ZonePlaybackProgress } from "./ZonePlaybackProgress";
 
 interface MapShapePanelProps {
   canMutate: boolean;
@@ -364,6 +365,9 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
             Inside the zone: full volume. Outside: fades over {falloffDraft}m.
           </div>
         </div>
+
+        {/* Now-playing progress for this zone's current track (#82). */}
+        <ZonePlaybackProgress shapeId={shape.id} />
 
         {/* Provider search + uploader pinned above the queue. Search streams the
             chosen track straight into this zone's playlist (contextId). */}
