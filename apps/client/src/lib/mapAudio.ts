@@ -6,10 +6,12 @@
 // the only thing we add on top is per-shape storage (multiple parallel chains).
 
 import { audioContextManager } from "@/lib/audioContextManager";
+import { extractFileNameFromUrl } from "@/lib/utils";
 import { computeScheduleTiming, downloadBufferFromURL, useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { sendWSRequest } from "@/utils/ws";
 import { epochNow, ClientActionEnum, MAP_CONSTANTS } from "@beatsync/shared";
+import { toast } from "sonner";
 
 // Minimum lead time we want between calling source.start() and the audio thread
 // actually starting playback. Below this, start() is racy and tabs drift by a few ms
@@ -19,6 +21,20 @@ const MIN_SCHEDULE_LEAD_MS = 50;
 // thread for so the start lands sample-accurately. The buffer offset is advanced by
 // the same amount so the playback position still tracks the server's timeline.
 const LATE_RETRY_DELAY_MS = 250;
+// Pause before the single download/decode retry, so a transient network or
+// storage hiccup has a moment to clear before we re-request the same URL.
+const DOWNLOAD_RETRY_DELAY_MS = 1000;
+
+// Track name for user-facing errors. extractFileNameFromUrl strips the R2
+// timestamp suffix but throws on URLs without a path segment — fall back to
+// the raw URL rather than crash an error path.
+function trackNameFromUrl(url: string): string {
+  try {
+    return extractFileNameFromUrl(url);
+  } catch {
+    return url;
+  }
+}
 
 interface ShapeChain {
   buffer?: AudioBuffer;
@@ -78,7 +94,15 @@ async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
     return;
   }
 
-  const decode = downloadBufferFromURL({ url }).then((r) => r.audioBuffer);
+  // One delayed retry absorbs transient download failures (flaky network,
+  // storage hiccup); a second consecutive failure falls through to the catch
+  // below and is surfaced instead of leaving the zone silently "playing".
+  const attemptDownload = () => downloadBufferFromURL({ url }).then((r) => r.audioBuffer);
+  const decode = attemptDownload().catch(async (err) => {
+    console.warn(`[mapAudio] download/decode failed for shape ${shapeId}, retrying once`, err);
+    await new Promise((resolve) => setTimeout(resolve, DOWNLOAD_RETRY_DELAY_MS));
+    return attemptDownload();
+  });
 
   // Mark this as the latest requested URL, but DON'T touch chain.url yet — that
   // names the track the current buffer actually holds, and until decode finishes
@@ -114,6 +138,20 @@ async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
     }
   } catch (err) {
     console.error(`[mapAudio] decode failed for shape ${shapeId}`, err);
+    // Surface the failure — without this the zone shows "playing" while its
+    // pendingPlay never fires and stays silent with no explanation. Skip the
+    // toast when a newer load superseded this one (its outcome is moot).
+    if (chains.get(shapeId)?.requestedUrl === url) {
+      // decodeAudioData rejects with a DOMException (EncodingError) — that
+      // means the bytes arrived but this browser can't decode the format.
+      const reason =
+        err instanceof DOMException
+          ? "this browser can't decode the file format"
+          : err instanceof Error
+            ? err.message
+            : "download failed";
+      toast.error(`Can't play "${trackNameFromUrl(url)}" — ${reason}`);
+    }
   } finally {
     if (chain.bufferPromise === decode) chain.bufferPromise = undefined;
   }
