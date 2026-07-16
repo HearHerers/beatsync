@@ -479,6 +479,13 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   useEffect(() => {
     const map = mapRef.current;
     if (!pendingRecenter || !map || !ownPosition) return;
+    // Two MapCanvas instances are mounted at once (desktop + mobile layouts;
+    // the inactive one is display:none, so its map is 0×0). flyTo on a
+    // zero-size map divides by zero in Leaflet's flight math and throws
+    // "Invalid LatLng (NaN, NaN)", crashing the app. Skip without consuming
+    // so the visible instance handles the recenter instead.
+    const size = map.getSize();
+    if (size.x === 0 || size.y === 0) return;
     map.flyTo([ownPosition.lat, ownPosition.lng], Math.max(map.getZoom(), 18), { duration: 0.6 });
     useMapStore.getState().consumeRecenter();
   }, [pendingRecenter, ownPosition]);
