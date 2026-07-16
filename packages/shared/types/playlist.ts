@@ -43,3 +43,38 @@ export const PlaylistSchema = z.object({
   playbackState: PlaylistPlaybackStateSchema,
 });
 export type PlaylistType = z.infer<typeof PlaylistSchema>;
+
+// ── Portable playlist file (import/export) ──────────────────────────
+//
+// A self-describing JSON document a curator can download from one zone (or
+// audio-room) playlist and import into another — possibly in a different room.
+// Tracks travel as URLs; `name` is a human-readable label (derived from the
+// URL) carried only for display/diffing before audio loads. `loop` is recorded
+// for reference but NOT applied on import (the destination keeps its setting).
+
+/** Current export format version. Bump on breaking shape changes. */
+export const PLAYLIST_EXPORT_VERSION = 1;
+
+/** Hard cap on tracks accepted from an imported file (abuse guard). */
+export const PLAYLIST_EXPORT_MAX_TRACKS = 1000;
+
+export const PlaylistExportTrackSchema = z.object({
+  url: z.string().url(),
+  name: z.string().optional(),
+});
+export type PlaylistExportTrackType = z.infer<typeof PlaylistExportTrackSchema>;
+
+export const PlaylistExportSchema = z.object({
+  /** Format discriminator + version. */
+  beatsyncPlaylist: z.literal(PLAYLIST_EXPORT_VERSION),
+  /** Optional label (e.g. "Zone abc123"). */
+  name: z.string().optional(),
+  /** The source playlist's loop flag, for reference only (not applied). */
+  loop: z.boolean().optional(),
+  /** epoch ms when exported. */
+  exportedAt: z.number().optional(),
+  /** Room the playlist was exported from, for provenance/debugging. */
+  sourceRoomId: z.string().optional(),
+  tracks: z.array(PlaylistExportTrackSchema).max(PLAYLIST_EXPORT_MAX_TRACKS),
+});
+export type PlaylistExportType = z.infer<typeof PlaylistExportSchema>;

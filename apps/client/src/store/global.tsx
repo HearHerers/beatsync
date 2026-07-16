@@ -25,6 +25,7 @@ import {
   GRID,
   LoadAudioSourceType,
   LOW_PASS_CONSTANTS,
+  MAIN_CONTEXT_ID,
   NTP_CONSTANTS,
   PlaybackControlsPermissionsEnum,
   PlaybackControlsPermissionsType,
@@ -259,7 +260,13 @@ interface GlobalState extends GlobalStateValues {
 
   // Audio source methods
   handleLoadAudioSource: (sources: LoadAudioSourceType) => void;
-  broadcastReorder: (urls: AudioSourceType[]) => void;
+  /** Reorder a context's playlist to `orderedUrls` (full new order by URL),
+   *  optimistically updating local state then broadcasting to the server.
+   *  Works for the audio-room "main" context and map-room shape contexts. */
+  broadcastReorder: (contextId: string, orderedUrls: string[]) => void;
+  /** Optimistically reorder a non-main context's tracks by URL, so a zone
+   *  list doesn't snap back before the server's PLAYLISTS_UPDATE arrives. */
+  reorderContextTracks: (contextId: string, orderedUrls: string[]) => void;
 }
 
 // Define initial state values
@@ -1002,25 +1009,46 @@ export const useGlobalStore = create<GlobalState>((set, get) => {
       });
     },
 
-    broadcastReorder: (newOrder: AudioSourceType[]) => {
+    broadcastReorder: (contextId: string, orderedUrls: string[]) => {
       const state = get();
       const { socket } = getSocket(state);
 
-      // Optimistically update local state immediately to prevent snap-back animation
-      const newAudioSources: AudioSourceState[] = newOrder.map((source) => {
-        // Preserve existing state (buffer, status) for each track
-        const existing = state.audioSources.find((as) => as.source.url === source.url);
-        return existing || { source, status: "idle" };
-      });
-
-      set({ audioSources: newAudioSources });
+      // Optimistically update local state immediately to prevent snap-back
+      // animation. Main reorders the global audioSources registry; non-main
+      // contexts (map-room shapes) reorder their playlist's tracks, which is
+      // what their Queue renders from.
+      if (contextId === MAIN_CONTEXT_ID) {
+        const newAudioSources: AudioSourceState[] = orderedUrls.map((url) => {
+          // Preserve existing state (buffer, status) for each track
+          const existing = state.audioSources.find((as) => as.source.url === url);
+          return existing || { source: { url }, status: "idle" };
+        });
+        set({ audioSources: newAudioSources });
+      } else {
+        state.reorderContextTracks(contextId, orderedUrls);
+      }
 
       sendWSRequest({
         ws: socket,
         request: {
-          type: ClientActionEnum.enum.REORDER_AUDIO_SOURCES,
-          reorderedAudioSources: newOrder,
+          type: ClientActionEnum.enum.REORDER_TRACK_IN_CONTEXT,
+          contextId,
+          orderedUrls,
         },
+      });
+    },
+
+    reorderContextTracks: (contextId: string, orderedUrls: string[]) => {
+      set((state) => {
+        const existing = state.playlists.get(contextId);
+        if (!existing) return state;
+        const byUrl = new Map(existing.tracks.map((t) => [t.url, t]));
+        // Reorder by URL, preserving the source objects. Drop any URL the
+        // playlist no longer has; the server's PLAYLISTS_UPDATE is authoritative.
+        const reordered = orderedUrls.map((url) => byUrl.get(url)).filter((t): t is AudioSourceType => Boolean(t));
+        const next = new Map(state.playlists);
+        next.set(contextId, { ...existing, tracks: reordered });
+        return { playlists: next };
       });
     },
 
