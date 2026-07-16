@@ -35,7 +35,7 @@ import {
 } from "@dnd-kit/core";
 import { restrictToVerticalAxis, restrictToWindowEdges } from "@dnd-kit/modifiers";
 import { arrayMove, SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { ListPlus } from "lucide-react";
+import { ListPlus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PoolRow } from "./PoolRow";
@@ -56,6 +56,7 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
   // URL pending delete confirmation; drives the confirmation dialog (null = closed).
   const [deleteUrl, setDeleteUrl] = useState<string | null>(null);
   const [dontAskAgain, setDontAskAgain] = useState(false);
+  const [deleteUnassignedOpen, setDeleteUnassignedOpen] = useState(false);
 
   // Stop any local preview when the pool list goes away (leaving the room).
   useEffect(() => () => usePreviewPlayer.getState().stop(), []);
@@ -119,6 +120,15 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
       urls: unassigned.map((t) => t.url),
     });
     toast.success(`Adding ${unassigned.length} unassigned track${unassigned.length === 1 ? "" : "s"} to ${zoneLabel}…`);
+  };
+
+  const confirmDeleteUnassigned = () => {
+    const urls = unassigned.map((t) => t.url);
+    if (urls.length > 0) {
+      send({ type: ClientActionEnum.enum.DELETE_AUDIO_SOURCES, urls });
+      toast.success(`Deleted ${urls.length} unassigned track${urls.length === 1 ? "" : "s"} from the room.`);
+    }
+    setDeleteUnassignedOpen(false);
   };
 
   const sensors = useSensors(
@@ -185,19 +195,35 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
         rows
       )}
 
-      {canMutate && shape && (
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="mt-2 h-7 justify-center gap-1.5 text-xs text-neutral-400 hover:text-white"
-          disabled={!isConnected || unassigned.length === 0}
-          title={unassigned.length === 0 ? "No unassigned tracks in the pool" : undefined}
-          onClick={handleAddUnassigned}
-        >
-          <ListPlus className="size-3.5" />
-          Add unassigned to {zoneLabel}
-        </Button>
+      {canMutate && (
+        <div className="mt-2 flex flex-col gap-1">
+          {shape && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 justify-center gap-1.5 text-xs text-neutral-400 hover:text-white"
+              disabled={!isConnected || unassigned.length === 0}
+              title={unassigned.length === 0 ? "No unassigned tracks in the pool" : undefined}
+              onClick={handleAddUnassigned}
+            >
+              <ListPlus className="size-3.5" />
+              Add unassigned to {zoneLabel}
+            </Button>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 justify-center gap-1.5 text-xs text-neutral-500 hover:text-red-400"
+            disabled={!isConnected || unassigned.length === 0}
+            title={unassigned.length === 0 ? "No unassigned tracks in the pool" : undefined}
+            onClick={() => setDeleteUnassignedOpen(true)}
+          >
+            <Trash2 className="size-3.5" />
+            Delete unassigned
+          </Button>
+        </div>
       )}
 
       <Dialog
@@ -232,6 +258,27 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
             </Button>
             <Button type="button" variant="destructive" onClick={confirmDelete}>
               Delete everywhere
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteUnassignedOpen} onOpenChange={setDeleteUnassignedOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete unassigned tracks?</DialogTitle>
+            <DialogDescription>
+              Deletes the {unassigned.length} track{unassigned.length === 1 ? "" : "s"} that{" "}
+              {unassigned.length === 1 ? "isn’t" : "aren’t"} in any zone — removed from the Room Pool and the file
+              {unassigned.length === 1 ? "" : "s"} deleted. Tracks in a zone are untouched. This can’t be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setDeleteUnassignedOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" onClick={confirmDeleteUnassigned}>
+              Delete unassigned
             </Button>
           </DialogFooter>
         </DialogContent>
