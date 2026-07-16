@@ -54,6 +54,7 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
   const zonePlaylist = useGlobalStore((s) => (selectedShapeId ? s.playlists.get(selectedShapeId) : undefined));
   // URL pending delete confirmation; drives the confirmation dialog (null = closed).
   const [deleteUrl, setDeleteUrl] = useState<string | null>(null);
+  const [dontAskAgain, setDontAskAgain] = useState(false);
 
   // Stop any local preview when the pool list goes away (leaving the room).
   useEffect(() => () => usePreviewPlayer.getState().stop(), []);
@@ -80,10 +81,21 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
     toast.success(`Added to ${zoneLabel}`);
   };
 
+  const doDelete = (url: string) => {
+    send({ type: ClientActionEnum.enum.DELETE_AUDIO_SOURCES, urls: [url] });
+    toast.success("Deleted from the room (removed from every zone).");
+  };
+
+  // Trash click: honor the persisted "don't ask again" choice, else confirm.
+  const requestDelete = (url: string) => {
+    if (skipPoolDeleteConfirm()) doDelete(url);
+    else setDeleteUrl(url);
+  };
+
   const confirmDelete = () => {
     if (!deleteUrl) return;
-    send({ type: ClientActionEnum.enum.DELETE_AUDIO_SOURCES, urls: [deleteUrl] });
-    toast.success("Deleted from the room (removed from every zone).");
+    if (dontAskAgain) setSkipPoolDeleteConfirm(true);
+    doDelete(deleteUrl);
     setDeleteUrl(null);
   };
 
@@ -134,7 +146,7 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
       zoneLabel={zoneLabel}
       hasShape={Boolean(shape)}
       onAddToZone={handleAdd}
-      onRequestDelete={setDeleteUrl}
+      onRequestDelete={requestDelete}
     />
   ));
 
@@ -176,7 +188,15 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
         </Button>
       )}
 
-      <Dialog open={deleteUrl !== null} onOpenChange={(open) => !open && setDeleteUrl(null)}>
+      <Dialog
+        open={deleteUrl !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteUrl(null);
+            setDontAskAgain(false);
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="truncate">Delete “{deleteUrl ? safeTrackName(deleteUrl) : ""}”?</DialogTitle>
@@ -185,6 +205,15 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
               deletes the file. This can’t be undone.
             </DialogDescription>
           </DialogHeader>
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-neutral-400 select-none">
+            <input
+              type="checkbox"
+              className="size-3.5 accent-red-500"
+              checked={dontAskAgain}
+              onChange={(e) => setDontAskAgain(e.target.checked)}
+            />
+            Don’t ask again on this device
+          </label>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setDeleteUrl(null)}>
               Cancel
@@ -205,5 +234,25 @@ function safeTrackName(url: string): string {
     return extractFileNameFromUrl(url);
   } catch {
     return url;
+  }
+}
+
+// Per-browser "skip the pool-delete confirmation" preference.
+const SKIP_POOL_DELETE_KEY = "beatsync.hidePoolDeleteConfirm";
+function skipPoolDeleteConfirm(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(SKIP_POOL_DELETE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function setSkipPoolDeleteConfirm(skip: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (skip) window.localStorage.setItem(SKIP_POOL_DELETE_KEY, "1");
+    else window.localStorage.removeItem(SKIP_POOL_DELETE_KEY);
+  } catch {
+    /* ignore storage failures (private mode, quota) */
   }
 }
