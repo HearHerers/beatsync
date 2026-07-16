@@ -128,6 +128,14 @@ S3_ENDPOINT=
 S3_ACCESS_KEY_ID=
 S3_SECRET_ACCESS_KEY=
 OPERATOR_SECRET=        # optional; enables /admin/* (fail-closed 404 when unset) and rooms:list/room:info --sync
+
+# Music provider search/streaming (all optional; provider disabled without PROVIDER_URL)
+PROVIDER_TYPE=          # qobuz (default) | navidrome
+PROVIDER_URL=
+NAVIDROME_USER=
+NAVIDROME_PASSWORD=
+NAVIDROME_STREAM_FORMAT=       # transcode target for streamed tracks; default mp3, "raw" = untouched original
+NAVIDROME_STREAM_MAX_BITRATE=  # default 320; ignored when format is raw
 ```
 
 ## Deployment
