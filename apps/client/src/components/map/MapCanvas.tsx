@@ -30,6 +30,66 @@ const DefaultIcon = L.icon({
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
+/**
+ * Build a "balloon over a precise dot" Leaflet divIcon for a user marker.
+ * Layout (top to bottom):
+ *   - 28px avatar circle (country flag if available, else two-letter initials).
+ *     Admin gets a small yellow crown badge in the corner.
+ *   - 6px white stem.
+ *   - 8px dot anchored at the bottom — this is the geographic anchor point so
+ *     dragging keeps the geo position accurate.
+ * Total icon: 28 × 44px, anchored at bottom-center.
+ */
+function buildUserAvatarIcon(opts: {
+  username: string;
+  flagUrl?: string;
+  isAdmin: boolean;
+  isSelf: boolean;
+}): L.DivIcon {
+  const { username, flagUrl, isAdmin, isSelf } = opts;
+  const accent = isSelf ? "#22c55e" : "#3b82f6";
+  const initials = username
+    .split(/[-\s]+/)
+    .map((part) => part[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  // Escape HTML in user-controlled strings (the flag URL comes from our own
+  // IP-geo helper so it's safer, but be defensive on the username initials).
+  const safeInitials = initials.replace(/[<>&"']/g, "");
+  const safeFlagUrl = flagUrl?.replace(/[<>"']/g, "");
+
+  const inner = safeFlagUrl
+    ? `<img src="${safeFlagUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" onerror="this.parentElement.innerHTML='<span style=color:white;font-size:11px;font-weight:600;letter-spacing:0.5px>${safeInitials}</span>';this.parentElement.style.background='${accent}'" />`
+    : `<span style="color:#fff;font-size:11px;font-weight:600;letter-spacing:0.5px">${safeInitials}</span>`;
+
+  const crown = isAdmin
+    ? `<div style="position:absolute;top:-3px;right:-3px;background:#eab308;border-radius:50%;width:12px;height:12px;display:flex;align-items:center;justify-content:center;border:1px solid #fff">
+        <svg width="7" height="7" viewBox="0 0 24 24" fill="#854d0e"><path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5z"/></svg>
+      </div>`
+    : "";
+
+  const html = `
+    <div style="display:flex;flex-direction:column;align-items:center;pointer-events:auto">
+      <div style="position:relative;width:28px;height:28px;border-radius:50%;background:${accent};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;overflow:visible">
+        <div style="width:100%;height:100%;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center">${inner}</div>
+        ${crown}
+      </div>
+      <div style="width:2px;height:6px;background:#fff;box-shadow:0 0 2px rgba(0,0,0,0.5)"></div>
+      <div style="width:8px;height:8px;border-radius:50%;background:#fff;border:1.5px solid ${accent};box-shadow:0 1px 3px rgba(0,0,0,0.6);margin-top:-1px"></div>
+    </div>
+  `;
+
+  return L.divIcon({
+    html,
+    iconSize: [28, 44],
+    iconAnchor: [14, 44], // bottom-center — the precise dot
+    tooltipAnchor: [0, -44],
+    className: "",
+  });
+}
+
 interface MapCanvasProps {
   canMutate: boolean;
 }
@@ -592,18 +652,23 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
       seen.add(client.clientId);
       const existing = otherMarkersRef.current.get(client.clientId);
       const pos: L.LatLngTuple = [client.geoPosition.lat, client.geoPosition.lng];
+      const icon = buildUserAvatarIcon({
+        username: client.username,
+        flagUrl: client.location?.flagSvgURL,
+        isAdmin: !!client.isAdmin,
+        isSelf: false,
+      });
+      const label = client.username || client.clientId;
       if (existing) {
         existing.setLatLng(pos);
+        // Rebuild icon + tooltip on every render — handles username changes,
+        // admin promotion, flag becoming available after IP geo resolves.
+        existing.setIcon(icon);
+        existing.unbindTooltip();
+        existing.bindTooltip(label, { direction: "top" });
       } else {
-        const marker = L.marker(pos, {
-          icon: L.divIcon({
-            html: `<div style="width:14px;height:14px;border-radius:50%;background:#3b82f6;border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,0.4)"></div>`,
-            iconSize: [14, 14],
-            iconAnchor: [7, 7],
-            className: "",
-          }),
-        });
-        marker.bindTooltip(client.username || client.clientId, { direction: "top" });
+        const marker = L.marker(pos, { icon });
+        marker.bindTooltip(label, { direction: "top" });
         marker.addTo(map);
         otherMarkersRef.current.set(client.clientId, marker);
       }
@@ -630,19 +695,30 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     }
 
     const pos: L.LatLngTuple = [ownPosition.lat, ownPosition.lng];
+    const me = connectedClients.find((c) => c.clientId === myClientId);
+    const selfIcon = buildUserAvatarIcon({
+      username: me?.username ?? "You",
+      flagUrl: me?.location?.flagSvgURL,
+      isAdmin: !!me?.isAdmin,
+      isSelf: true,
+    });
+    const selfLabel = me?.username || "You";
     if (ownMarkerRef.current) {
-      if (!isDraggingOwnRef.current) ownMarkerRef.current.setLatLng(pos);
+      // During a drag, Leaflet owns the marker's DOM element + position. This
+      // effect still re-runs every drag frame (ownPosition updates via the
+      // "drag" handler below), but rebuilding the avatar icon and calling
+      // setIcon recreates that element — incl. the <img> flag — which janks and
+      // fights the drag handler's pointer tracking. Skip all marker mutation
+      // until the drag ends; a later ownPosition/clients change re-syncs it.
+      if (!isDraggingOwnRef.current) {
+        ownMarkerRef.current.setLatLng(pos);
+        ownMarkerRef.current.setIcon(selfIcon);
+        ownMarkerRef.current.unbindTooltip();
+        ownMarkerRef.current.bindTooltip(selfLabel, { direction: "top" });
+      }
     } else {
-      const marker = L.marker(pos, {
-        draggable: true,
-        icon: L.divIcon({
-          html: `<div style="width:18px;height:18px;border-radius:50%;background:#22c55e;border:3px solid #fff;box-shadow:0 0 6px rgba(0,0,0,0.5)"></div>`,
-          iconSize: [18, 18],
-          iconAnchor: [9, 9],
-          className: "",
-        }),
-      });
-      marker.bindTooltip("You", { direction: "top" });
+      const marker = L.marker(pos, { draggable: true, icon: selfIcon });
+      marker.bindTooltip(selfLabel, { direction: "top" });
       marker.on("dragstart", () => {
         isDraggingOwnRef.current = true;
       });
@@ -665,7 +741,7 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
       marker.addTo(map);
       ownMarkerRef.current = marker;
     }
-  }, [ownPosition, setOwnPosition]);
+  }, [ownPosition, setOwnPosition, connectedClients, myClientId]);
 
   return <div ref={containerRef} className="absolute inset-0 z-0" style={{ width: "100%", height: "100%" }} />;
 };
