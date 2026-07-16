@@ -1901,16 +1901,31 @@ export class RoomManager {
   addTrackToContext(contextId: string, source: AudioSourceType): AudioSourceType[] | undefined {
     const playlist = this.playlists.get(contextId);
     if (!playlist) return undefined;
+    // Beatgrid is a property of the audio file, not one occurrence. If this URL
+    // already has a grid on some other copy (e.g. imported onto the Room Pool
+    // copy before it was assigned to any zone), inherit it so the new zone
+    // track keeps its BPM and stays beat-sync-eligible. Without this, adding a
+    // gridded pool track to a zone would silently drop the grid.
+    let toAdd = source;
+    if (!toAdd.beatgrid) {
+      for (const pl of this.playlists.values()) {
+        const existing = pl.tracks.find((t) => t.url === source.url && t.beatgrid);
+        if (existing?.beatgrid) {
+          toAdd = { ...source, beatgrid: existing.beatgrid };
+          break;
+        }
+      }
+    }
     // De-duplicate by URL — re-adding an existing source is a no-op.
     if (!playlist.tracks.some((t) => t.url === source.url)) {
-      playlist.tracks = [...playlist.tracks, source];
+      playlist.tracks = [...playlist.tracks, toAdd];
     }
     // Pool invariant: the main context (Room Pool) is a superset of every
     // zone's tracks — anything added to a zone is also registered in the pool,
     // which is the single place a track is permanently deleted from. The
     // contextId guard keeps the recursion one level deep.
     if (contextId !== MAIN_CONTEXT_ID) {
-      this.addTrackToContext(MAIN_CONTEXT_ID, source);
+      this.addTrackToContext(MAIN_CONTEXT_ID, toAdd);
     }
     return playlist.tracks;
   }

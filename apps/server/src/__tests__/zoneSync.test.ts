@@ -136,6 +136,17 @@ describe("RoomManager.setTrackBeatgrid / syncZones", () => {
     expect(room.setTrackBeatgrid("https://example.com/nope.mp3", HEAT3)).toBe(0);
   });
 
+  it("carries an existing beatgrid onto a track added to a zone from the pool", () => {
+    const room = new RoomManager("grid-inherit-room");
+    room.addPlaylist("zoneA", { loop: true });
+    // Track lives only in the pool with a beatgrid (imported before assignment).
+    room.addTrackToContext(MAIN_CONTEXT_ID, { url: URL_A });
+    expect(room.setTrackBeatgrid(URL_A, HEAT3)).toBe(1); // pool only, so far
+    // Assigning it to a zone should inherit the pool copy's grid.
+    room.addTrackToContext("zoneA", { url: URL_A });
+    expect(room.getPlaylist("zoneA")!.tracks.find((t) => t.url === URL_A)!.beatgrid).toEqual(HEAT3);
+  });
+
   it("rejects sync when preconditions are unmet", () => {
     const room = createMapRoom();
     expect(room.syncZones("zoneA", "zoneA")).toBeInstanceOf(Error);
