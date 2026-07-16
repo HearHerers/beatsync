@@ -1461,6 +1461,15 @@ export class RoomManager {
     return Array.from(this.playlists.keys());
   }
 
+  /** Every distinct track URL across all contexts (pool and zones). */
+  getAllTrackUrls(): string[] {
+    const urls = new Set<string>();
+    for (const playlist of this.playlists.values()) {
+      for (const track of playlist.tracks) urls.add(track.url);
+    }
+    return Array.from(urls);
+  }
+
   /**
    * Return all playlists in wire format for broadcasting to clients. Used by
    * the initial-state burst on connect, and any time the playlist set changes.
@@ -1511,6 +1520,13 @@ export class RoomManager {
     if (!playlist.tracks.some((t) => t.url === source.url)) {
       playlist.tracks = [...playlist.tracks, source];
     }
+    // Pool invariant: the main context (Room Pool) is a superset of every
+    // zone's tracks — anything added to a zone is also registered in the pool,
+    // which is the single place a track is permanently deleted from. The
+    // contextId guard keeps the recursion one level deep.
+    if (contextId !== MAIN_CONTEXT_ID) {
+      this.addTrackToContext(MAIN_CONTEXT_ID, source);
+    }
     return playlist.tracks;
   }
 
@@ -1532,6 +1548,10 @@ export class RoomManager {
     }
     if (additions.length > 0) {
       playlist.tracks = [...playlist.tracks, ...additions];
+    }
+    // Pool invariant (see addTrackToContext): mirror zone imports into the pool.
+    if (contextId !== MAIN_CONTEXT_ID) {
+      this.addTracksToContext(MAIN_CONTEXT_ID, sources);
     }
     return playlist.tracks;
   }

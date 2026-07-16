@@ -18,11 +18,14 @@ const baseAxios = axios.create({
 
 export const uploadAudioFile = async (data: { file: File; roomId: string; contextId?: string }) => {
   try {
-    // Step 1: Get presigned upload URL from server
+    // Step 1: Get presigned upload URL from server. The size hint lets the
+    // server answer with an existing track's URL when the same file (display
+    // name + byte size) is already in the room, instead of a presigned URL.
     const uploadUrlRequest: GetUploadUrlType = {
       roomId: data.roomId,
       fileName: data.file.name,
       contentType: data.file.type,
+      fileSizeBytes: data.file.size,
     };
 
     const presignedURLResponse = await baseAxios.post<UploadUrlResponseType>(
@@ -30,7 +33,26 @@ export const uploadAudioFile = async (data: { file: File; roomId: string; contex
       uploadUrlRequest
     );
 
-    const { uploadUrl, publicUrl } = presignedURLResponse.data;
+    const presigned = presignedURLResponse.data;
+
+    // Duplicate: skip the upload entirely and register a reference to the
+    // existing object (in the requested context, if any).
+    if ("existingUrl" in presigned) {
+      const dedupeCompleteRequest: UploadCompleteType = {
+        roomId: data.roomId,
+        originalName: data.file.name,
+        publicUrl: presigned.existingUrl,
+        ...(data.contextId !== undefined && { contextId: data.contextId }),
+      };
+      await baseAxios.post<UploadCompleteResponseType>("/upload/complete", dedupeCompleteRequest);
+      return {
+        success: true,
+        publicUrl: presigned.existingUrl,
+        deduped: true,
+      };
+    }
+
+    const { uploadUrl, publicUrl } = presigned;
 
     // Step 2: Upload directly to R2 using presigned URL
     const uploadResponse = await fetch(uploadUrl, {
@@ -58,6 +80,7 @@ export const uploadAudioFile = async (data: { file: File; roomId: string; contex
     return {
       success: true,
       publicUrl,
+      deduped: false,
     };
   } catch (error) {
     if (axios.isAxiosError(error)) {

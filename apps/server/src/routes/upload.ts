@@ -1,15 +1,82 @@
 import type { UploadCompleteResponseType, UploadUrlResponseType } from "@beatsync/shared";
-import { GetUploadUrlSchema, UploadCompleteSchema } from "@beatsync/shared";
+import { GetUploadUrlSchema, R2_AUDIO_FILE_NAME_DELIMITER, UploadCompleteSchema } from "@beatsync/shared";
 import type { BunServer } from "@/utils/websocket";
 import {
   createKey,
   generateAudioFileName,
   generatePresignedUploadUrl,
+  getObjectSize,
   getPublicAudioUrl,
+  keyFromPublicUrl,
+  roomIdFromUrl,
   validateR2Config,
 } from "@/lib/r2";
 import { globalManager } from "@/managers";
+import type { RoomManager } from "@/managers/RoomManager";
 import { errorResponse, jsonResponse, sendBroadcast } from "@/utils/responses";
+
+/**
+ * The human-readable display name encoded in one of our uploaded object URLs
+ * (the part of the basename before the `___` uniquifier), or null for URLs
+ * that don't carry one (external/registered URLs, default tracks).
+ */
+export function displayNameFromUrl(url: string): string | null {
+  try {
+    const base = decodeURIComponent(new URL(url).pathname.split("/").pop() ?? "");
+    const delimiterIndex = base.indexOf(R2_AUDIO_FILE_NAME_DELIMITER);
+    return delimiterIndex === -1 ? null : base.substring(0, delimiterIndex);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A track among `candidateUrls` that is (almost certainly) the same file:
+ * same display name AND same byte size. Returns its URL, or null. Only the
+ * room's own uploaded objects are considered — external URLs can't be
+ * size-checked, and other rooms' objects shouldn't be cross-referenced.
+ * The URL/size resolvers are parameters so tests can supply fakes without
+ * S3 config; the route passes the real r2 implementations.
+ */
+export async function findDuplicateTrack(params: {
+  candidateUrls: string[];
+  roomId: string;
+  targetDisplayName: string;
+  fileSizeBytes: number;
+  resolveRoomId: (url: string) => string | null;
+  resolveKey: (url: string) => string | null;
+  resolveSize: (key: string) => Promise<number | null>;
+}): Promise<string | null> {
+  for (const url of params.candidateUrls) {
+    if (params.resolveRoomId(url) !== params.roomId) continue;
+    if (displayNameFromUrl(url) !== params.targetDisplayName) continue;
+    const key = params.resolveKey(url);
+    if (!key) continue;
+    const size = await params.resolveSize(key);
+    if (size === params.fileSizeBytes) return url;
+  }
+  return null;
+}
+
+/** findDuplicateTrack against a live room, wired to the real r2 helpers. */
+function findRoomDuplicate(
+  room: RoomManager,
+  roomId: string,
+  fileName: string,
+  fileSizeBytes: number
+): Promise<string | null> {
+  return findDuplicateTrack({
+    candidateUrls: room.getAllTrackUrls(),
+    roomId,
+    // Run the incoming name through the production sanitizer so the comparison
+    // matches exactly what an earlier upload of this file was stored as.
+    targetDisplayName: generateAudioFileName(fileName).split(R2_AUDIO_FILE_NAME_DELIMITER)[0],
+    fileSizeBytes,
+    resolveRoomId: roomIdFromUrl,
+    resolveKey: keyFromPublicUrl,
+    resolveSize: getObjectSize,
+  });
+}
 
 // New endpoint to get presigned upload URL
 export const handleGetPresignedURL = async (req: Request) => {
@@ -32,12 +99,24 @@ export const handleGetPresignedURL = async (req: Request) => {
       return errorResponse(`Invalid request data: ${parseResult.error.message}`, 400);
     }
 
-    const { roomId, fileName, contentType } = parseResult.data;
+    const { roomId, fileName, contentType, fileSizeBytes } = parseResult.data;
 
     // Check if room exists
     const room = globalManager.getRoom(roomId);
     if (!room) {
       return errorResponse("Room not found. Please join the room before uploading files.", 404);
+    }
+
+    // Dedupe: when the caller supplies the file size, a track with the same
+    // display name and byte size already in the room is the same file — answer
+    // with its URL so the caller references it instead of storing a copy.
+    if (fileSizeBytes !== undefined) {
+      const existingUrl = await findRoomDuplicate(room, roomId, fileName, fileSizeBytes);
+      if (existingUrl) {
+        console.log(`Upload dedupe: "${fileName}" (${fileSizeBytes} B) already in room ${roomId} as ${existingUrl}`);
+        const response: UploadUrlResponseType = { existingUrl };
+        return jsonResponse(response);
+      }
     }
 
     // Generate unique filename
