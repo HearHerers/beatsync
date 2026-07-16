@@ -73,7 +73,7 @@ export const RoomQRCode = () => {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base font-medium">
               <QrCode size={18} className="text-neutral-400" />
-              Share Beatsync Room
+              Share HearHere Room
             </DialogTitle>
             {/* <DialogDescription className="text-neutral-400 -mt-1.5 text-left">
               Scan QR code to join room {roomId}
@@ -84,7 +84,7 @@ export const RoomQRCode = () => {
             {/* Domain and Room Code Display */}
             <div className="w-full text-center space-y-2">
               <div className="text-3xl font-semibold text-white">
-                {typeof window !== "undefined" ? window.location.host : "beatsync.gg"}
+                {typeof window !== "undefined" ? window.location.host : "hearhere.now"}
               </div>
 
               <div className="text-3xl font-bold text-white bg-neutral-800/50 border border-neutral-700/50 rounded-lg px-8 py-2 inline-block">
