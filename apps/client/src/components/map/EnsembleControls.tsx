@@ -19,6 +19,7 @@ import { useCanMutate, useGlobalStore } from "@/store/global";
 import { MAIN_CONTEXT_ID } from "@beatsync/shared";
 import { Pause, Play } from "lucide-react";
 import { useMemo } from "react";
+import { ZonePlaybackProgress } from "./ZonePlaybackProgress";
 
 export const EnsembleControls = () => {
   const canMutate = useCanMutate();
@@ -66,10 +67,12 @@ export const EnsembleControls = () => {
   };
 
   return (
-    // Right-align the entire row so the bottom-left corner stays free for the
-    // Next.js dev overlay (which would otherwise cover the status text).
-    <div className="flex w-full items-center justify-end gap-3">
-      <div className="text-xs text-neutral-400">
+    // Now-playing progress on the left (grows, truncates), status + toggle on
+    // the right. Left padding keeps the very corner free for the Next.js dev
+    // overlay, which would otherwise cover the track name.
+    <div className="flex w-full items-center justify-end gap-3 pl-10">
+      <ZonePlaybackProgress />
+      <div className="shrink-0 text-xs text-neutral-400">
         {totalWithTracks === 0
           ? canMutate
             ? "Draw a zone and add audio to start"
