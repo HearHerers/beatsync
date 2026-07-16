@@ -23,7 +23,8 @@ const LATE_RETRY_DELAY_MS = 250;
 interface ShapeChain {
   buffer?: AudioBuffer;
   bufferPromise?: Promise<AudioBuffer>; // in-flight decode for the current URL
-  url?: string; // URL the buffer was decoded from
+  url?: string; // URL the CURRENT buffer was actually decoded from — set only once decode completes
+  requestedUrl?: string; // latest URL asked for; leads `url` while a decode is in flight
   sourceNode?: AudioBufferSourceNode;
   proximityGain: GainNode; // 0..1 controlled by GPS distance
   // A play() that arrived before the buffer was ready (typical for late joiners who
@@ -79,15 +80,20 @@ async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
 
   const decode = downloadBufferFromURL({ url }).then((r) => r.audioBuffer);
 
-  chain.url = url;
+  // Mark this as the latest requested URL, but DON'T touch chain.url yet — that
+  // names the track the current buffer actually holds, and until decode finishes
+  // the buffer is still the previous track's. Setting chain.url early is what let
+  // a scheduled PLAY play the stale buffer while the UI showed the new track (#97).
+  chain.requestedUrl = url;
   chain.bufferPromise = decode;
   try {
     const buffer = await decode;
-    if (chains.get(shapeId)?.url !== url) {
+    if (chains.get(shapeId)?.requestedUrl !== url) {
       // A newer load superseded this one before decode finished — drop it.
       return;
     }
     chain.buffer = buffer;
+    chain.url = url; // buffer and its URL now agree
     // Mirror the decoded buffer into the global audioSources registry so
     // getAudioDuration (Queue's "--:--" → duration cell) lights up for shape
     // tracks. Audio rooms hit this same path via loadAudioSource() in
@@ -97,13 +103,6 @@ async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
       audioSources: state.audioSources.map((as) => (as.source.url === url ? { ...as, status: "loaded", buffer } : as)),
     }));
     notifyLoaded(shapeId, url);
-
-    console.log(
-      "[#97] decoded",
-      shapeId.slice(0, 6),
-      "url=" + url.split("/").pop(),
-      "pending=" + chain.pendingPlay?.audioSource?.split("/").pop()
-    );
 
     // If a play() arrived while we were decoding (late-join resume), re-fire it now
     // that the buffer is ready. Only honor it if the URL still matches the pending
@@ -142,13 +141,6 @@ function notifyLoaded(shapeId: string, url: string): void {
  */
 function playShape(shapeId: string, audioSource: string, trackTimeSeconds: number, targetServerTime: number): void {
   const chain = getOrCreateChain(shapeId);
-  console.log(
-    "[#97] playShape",
-    shapeId.slice(0, 6),
-    "req=" + audioSource.split("/").pop(),
-    "chainUrl=" + chain.url?.split("/").pop(),
-    "hasBuf=" + !!chain.buffer
-  );
 
   // Buffer not ready (typical for late-join unicast resumes where there's no load
   // gate). Stash the play parameters; loadAudioForShape will replay once decode
@@ -260,12 +252,6 @@ function playShape(shapeId: string, audioSource: string, trackTimeSeconds: numbe
 
   try {
     source.start(startAt, offset);
-    console.log(
-      "[#97] START",
-      shapeId.slice(0, 6),
-      "url=" + audioSource.split("/").pop(),
-      "chainUrl=" + chain.url?.split("/").pop()
-    );
   } catch (err) {
     console.error(`[mapAudio] failed to start shape ${shapeId}`, err);
     return;

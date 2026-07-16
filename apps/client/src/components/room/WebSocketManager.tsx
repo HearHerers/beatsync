@@ -258,11 +258,6 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
         const { scheduledAction, serverTimeToExecute } = response;
 
         if (scheduledAction.type === "PLAY") {
-          console.log(
-            "[#97] recv PLAY",
-            scheduledAction.contextId ? scheduledAction.contextId.slice(0, 6) : "main",
-            "url=" + scheduledAction.audioSource.split("/").pop()
-          );
           if (scheduledAction.contextId) {
             mapAudio.playShape(
               scheduledAction.contextId,
