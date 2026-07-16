@@ -32,9 +32,11 @@ export const INITIAL_PLAYLIST_PLAYBACK_STATE: PlaylistPlaybackStateType = {
 
 /**
  * Server-authoritative playlist state broadcast to clients. Audio rooms have one
- * playlist with id="main"; future map rooms have one per shape. The `loop` flag
- * determines what happens when a track ends — true = loop the current track until
- * the user advances, false = play once then stop (audio-room default).
+ * playlist with id="main"; map rooms have one per shape. The `loop` flag
+ * determines what happens when the current track ends:
+ *   - Map zones: true = advance through the whole playlist and wrap back to the
+ *     top at the end; false = play through once and stop (see mapAudio #99).
+ *   - Audio room: client-driven autoplay advances the queue; loop unused here.
  */
 export const PlaylistSchema = z.object({
   id: z.string(),
