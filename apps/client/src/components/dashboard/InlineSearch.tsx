@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { useCanMutate, useGlobalStore } from "@/store/global";
 import { sendWSRequest } from "@/utils/ws";
 import { ClientActionEnum } from "@beatsync/shared";
-import { ArrowDown, Search as SearchIcon, X, ZapIcon } from "lucide-react";
+import { ArrowDown, Search as SearchIcon, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import * as React from "react";
 import { useForm } from "react-hook-form";
@@ -302,12 +302,6 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
           </div>
         </div>
       </form>
-
-      {/* Beta Disclaimer */}
-      <div className="mt-2 flex items-center gap-1 text-[10px] font-mono text-neutral-500 ml-0.5">
-        <ZapIcon className="size-3 text-neutral-400 stroke-1" />
-        <span>[EXPERIMENTAL FREE BETA]</span>
-      </div>
 
       {/* Search Results Dropdown */}
       <AnimatePresence>

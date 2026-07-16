@@ -216,7 +216,8 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
           </div>
         )}
         {canMutate && (
-          <div className="px-3 pt-3">
+          <div className="flex flex-col gap-2 px-3 pt-3">
+            <InlineSearch contextId={MAIN_CONTEXT_ID} />
             <AudioUploaderMinimal label="Upload to Room Pool" destination="Room Pool" />
           </div>
         )}
