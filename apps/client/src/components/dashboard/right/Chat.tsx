@@ -2,7 +2,7 @@
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useStateTransition } from "@/hooks/useStateTransition";
-import { countryCodeEmoji } from "@/lib/country/countryCode";
+import { emojiForId } from "@/lib/avatarEmoji";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/store/chat";
 import { useGlobalStore } from "@/store/global";
@@ -214,12 +214,11 @@ export const Chat = () => {
                       <span className="text-[10px] text-neutral-500 ml-1 mb-0.5">
                         {(() => {
                           const username = getUserName(group[0].clientId, group[0].username);
-                          const countryCode = group[0].countryCode;
                           const senderIsCreator = group[0].isCreator;
 
                           return (
-                            <span title={countryCode ? `Country: ${countryCode}` : undefined}>
-                              {countryCode && `${countryCodeEmoji(countryCode)} `}
+                            <span>
+                              {`${emojiForId(group[0].clientId)} `}
                               {username}
                               {senderIsCreator && (
                                 <span className="text-sky-400 bg-sky-500/15 px-0.5 rounded ml-0.5 font-semibold">
