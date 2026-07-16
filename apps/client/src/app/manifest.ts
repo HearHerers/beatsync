@@ -2,10 +2,10 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Beatsync",
-    short_name: "Beatsync",
+    name: "HearHere",
+    short_name: "HearHere",
     description:
-      "Turn every device into a synchronized speaker. Beatsync is an open-source music player for multi-device audio playback. Host a listening party today!",
+      "Turn every device into a synchronized speaker. HearHere is an open-source music player for multi-device audio playback. Host a listening party today!",
     start_url: "/",
     display: "standalone",
     background_color: "#111111",
