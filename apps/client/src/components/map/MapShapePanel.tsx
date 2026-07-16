@@ -64,6 +64,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
   const importInputRef = useRef<HTMLInputElement>(null);
   const beatgridInputRef = useRef<HTMLInputElement>(null);
   const poolImportInputRef = useRef<HTMLInputElement>(null);
+  const poolBeatgridInputRef = useRef<HTMLInputElement>(null);
   const [poolClearOpen, setPoolClearOpen] = useState(false);
 
   const shape = selectedShapeId ? shapes.get(selectedShapeId) : undefined;
@@ -240,6 +241,28 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
                   const file = e.target.files?.[0];
                   e.target.value = ""; // allow re-importing the same file
                   if (file) void handlePoolImportFile(file);
+                }}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-1.5 text-neutral-500 hover:text-neutral-200"
+                title="Import beatgrids (extract_beatgrids.py JSON) — matches every track in the room"
+                disabled={!isConnected}
+                onClick={() => poolBeatgridInputRef.current?.click()}
+              >
+                <Music2 className="size-3.5" />
+              </Button>
+              <input
+                ref={poolBeatgridInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = ""; // allow re-importing the same file
+                  if (file) void handleImportBeatgrids(file);
                 }}
               />
               <Button
