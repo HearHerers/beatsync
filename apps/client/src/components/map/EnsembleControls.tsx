@@ -15,9 +15,10 @@
 // queue (clicking a track).
 
 import { Button } from "@/components/ui/button";
+import { useLocalZonePlayback } from "@/hooks/useLocalZonePlayback";
 import { useCanMutate, useGlobalStore } from "@/store/global";
 import { MAIN_CONTEXT_ID } from "@beatsync/shared";
-import { Pause, Play } from "lucide-react";
+import { Loader2, Pause, Play } from "lucide-react";
 import { useMemo } from "react";
 
 export const EnsembleControls = () => {
@@ -26,13 +27,15 @@ export const EnsembleControls = () => {
   const isConnected = useGlobalStore((s) => s.socket?.readyState === WebSocket.OPEN);
   const broadcastPlayAll = useGlobalStore((s) => s.broadcastPlayAll);
   const broadcastPauseAll = useGlobalStore((s) => s.broadcastPauseAll);
+  const localPlayback = useLocalZonePlayback();
 
   // Derive counts + the contextId list for each operation. Skip the main
   // context — in a map room it's the Room Pool (a superset library), not a
   // playable zone.
-  const { playingCount, totalWithTracks, playContextIds, pauseContextIds } = useMemo(() => {
+  const { playingCount, totalWithTracks, playContextIds, pauseContextIds, loadingCount } = useMemo(() => {
     let playing = 0;
     let withTracks = 0;
+    let loading = 0;
     const playableIds: string[] = [];
     const pausableIds: string[] = [];
     for (const p of playlists.values()) {
@@ -44,6 +47,9 @@ export const EnsembleControls = () => {
       if (p.playbackState.type === "playing") {
         playing++;
         pausableIds.push(p.id);
+        // Server-playing but this device is still downloading/decoding the
+        // track — the zone is silent here until the load completes.
+        if (localPlayback.get(p.id) === "loading") loading++;
       }
     }
     return {
@@ -51,8 +57,9 @@ export const EnsembleControls = () => {
       totalWithTracks: withTracks,
       playContextIds: playableIds,
       pauseContextIds: pausableIds,
+      loadingCount: loading,
     };
-  }, [playlists]);
+  }, [playlists, localPlayback]);
 
   const anyPlaying = playingCount > 0;
   const disabled = !isConnected || totalWithTracks === 0;
@@ -69,12 +76,20 @@ export const EnsembleControls = () => {
     // Right-align the entire row so the bottom-left corner stays free for the
     // Next.js dev overlay (which would otherwise cover the status text).
     <div className="flex w-full items-center justify-end gap-3">
-      <div className="text-xs text-neutral-400">
-        {totalWithTracks === 0
-          ? canMutate
-            ? "Draw a zone and add audio to start"
-            : "Nothing playing yet"
-          : `${playingCount} of ${totalWithTracks} zone${totalWithTracks === 1 ? "" : "s"} playing`}
+      <div className="flex items-center gap-2 text-xs text-neutral-400">
+        <span>
+          {totalWithTracks === 0
+            ? canMutate
+              ? "Draw a zone and add audio to start"
+              : "Nothing playing yet"
+            : `${playingCount} of ${totalWithTracks} zone${totalWithTracks === 1 ? "" : "s"} playing`}
+        </span>
+        {loadingCount > 0 && (
+          <span className="flex items-center gap-1 text-amber-400/90">
+            <Loader2 className="size-3 animate-spin" />
+            {loadingCount === playingCount ? "loading audio…" : `${loadingCount} loading…`}
+          </span>
+        )}
       </div>
       {canMutate && (
         <Button

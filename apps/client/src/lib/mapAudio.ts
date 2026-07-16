@@ -440,11 +440,28 @@ function isShapePlaying(shapeId: string): boolean {
   return !!chains.get(shapeId)?.sourceNode;
 }
 
+/** What THIS device is doing with a shape's audio right now:
+ *   - "playing": a source node is live (sound is/will be produced here)
+ *   - "loading": a download/decode is in flight, or a play is stashed waiting
+ *     on it (or on NTP sync / the autoplay unlock) — sound is coming, not yet
+ *   - "idle": nothing local (paused, range-culled, or load failed)
+ *  The server's playbackState says what SHOULD be playing; this says what IS.
+ *  UI reads it (polled) to show "loading…" instead of a silent "playing". */
+export type ShapeLocalPlayback = "playing" | "loading" | "idle";
+function getLocalPlaybackStates(): Map<string, ShapeLocalPlayback> {
+  const out = new Map<string, ShapeLocalPlayback>();
+  for (const [shapeId, chain] of chains.entries()) {
+    out.set(shapeId, chain.sourceNode ? "playing" : chain.bufferPromise || chain.pendingPlay ? "loading" : "idle");
+  }
+  return out;
+}
+
 export const mapAudio = {
   loadAudioForShape,
   playShape,
   pauseShape,
   isShapePlaying,
+  getLocalPlaybackStates,
   setProximityGain,
   unloadShape,
   knownShapeIds,
