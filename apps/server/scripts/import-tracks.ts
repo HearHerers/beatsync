@@ -48,8 +48,13 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function getPresignedUrl(roomId: string, fileName: string, contentType: string): Promise<UploadUrlResponseType> {
-  const body: GetUploadUrlType = { roomId, fileName, contentType };
+async function getPresignedUrl(
+  roomId: string,
+  fileName: string,
+  contentType: string,
+  fileSizeBytes?: number
+): Promise<UploadUrlResponseType> {
+  const body: GetUploadUrlType = { roomId, fileName, contentType, fileSizeBytes };
   return postJSON<UploadUrlResponseType>("/upload/get-presigned-url", body);
 }
 
@@ -58,20 +63,28 @@ async function getPresignedUrl(roomId: string, fileName: string, contentType: st
 async function uploadFileBytes(roomId: string, filePath: string): Promise<string> {
   const fileName = basename(filePath);
   const contentType = contentTypeForFile(fileName)!; // collectAudioFiles only returns supported files
-  const { uploadUrl, publicUrl } = await getPresignedUrl(roomId, fileName, contentType);
+  const bytes = await Bun.file(filePath).arrayBuffer();
+  const presigned = await getPresignedUrl(roomId, fileName, contentType, bytes.byteLength);
+
+  // Dedup: the server already has this exact file (display name + byte size) in
+  // the room, so it returns the existing object's URL and there's nothing to
+  // upload. Mirrors the client's uploadAudioFile (lib/api.ts).
+  if ("existingUrl" in presigned) {
+    return presigned.existingUrl;
+  }
 
   // Content-Type must match the presigned PutObjectCommand or the signature
   // check fails; likewise the body must be fixed-length bytes — a streamed
   // (chunked) body has no Content-Length and MinIO rejects the signature (403).
-  const res = await fetch(uploadUrl, {
+  const res = await fetch(presigned.uploadUrl, {
     method: "PUT",
     headers: { "content-type": contentType },
-    body: await Bun.file(filePath).arrayBuffer(),
+    body: bytes,
   });
   if (!res.ok) {
     throw new Error(`storage PUT returned ${res.status} ${res.statusText}`);
   }
-  return publicUrl;
+  return presigned.publicUrl;
 }
 
 interface CliArgs {
