@@ -98,6 +98,13 @@ async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
     }));
     notifyLoaded(shapeId, url);
 
+    console.log(
+      "[#97] decoded",
+      shapeId.slice(0, 6),
+      "url=" + url.split("/").pop(),
+      "pending=" + chain.pendingPlay?.audioSource?.split("/").pop()
+    );
+
     // If a play() arrived while we were decoding (late-join resume), re-fire it now
     // that the buffer is ready. Only honor it if the URL still matches the pending
     // play's source — otherwise a newer play has superseded it.
@@ -135,6 +142,13 @@ function notifyLoaded(shapeId: string, url: string): void {
  */
 function playShape(shapeId: string, audioSource: string, trackTimeSeconds: number, targetServerTime: number): void {
   const chain = getOrCreateChain(shapeId);
+  console.log(
+    "[#97] playShape",
+    shapeId.slice(0, 6),
+    "req=" + audioSource.split("/").pop(),
+    "chainUrl=" + chain.url?.split("/").pop(),
+    "hasBuf=" + !!chain.buffer
+  );
 
   // Buffer not ready (typical for late-join unicast resumes where there's no load
   // gate). Stash the play parameters; loadAudioForShape will replay once decode
@@ -246,6 +260,12 @@ function playShape(shapeId: string, audioSource: string, trackTimeSeconds: numbe
 
   try {
     source.start(startAt, offset);
+    console.log(
+      "[#97] START",
+      shapeId.slice(0, 6),
+      "url=" + audioSource.split("/").pop(),
+      "chainUrl=" + chain.url?.split("/").pop()
+    );
   } catch (err) {
     console.error(`[mapAudio] failed to start shape ${shapeId}`, err);
     return;

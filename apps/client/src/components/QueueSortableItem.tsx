@@ -57,6 +57,13 @@ export const QueueSortableItem = ({
     // closed-over selection can be stale.
     const st = useGlobalStore.getState();
 
+    console.log(
+      "[#97] click",
+      isMain ? "main" : contextId.slice(0, 6),
+      "url=" + url.split("/").pop(),
+      "zoneCur=" + st.playlists.get(contextId)?.playbackState?.audioSource?.split("/").pop()
+    );
+
     if (isMain) {
       // Audio-room behavior: change selection then play.
       if (url === st.selectedAudioUrl) {
