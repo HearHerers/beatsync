@@ -11,11 +11,10 @@
 
 import { Button } from "@/components/ui/button";
 import { extractFileNameFromUrl } from "@/lib/utils";
-import { zoneDisplayName } from "@/lib/zoneName";
 import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { sendWSRequest } from "@/utils/ws";
-import { ClientActionEnum, MAIN_CONTEXT_ID } from "@beatsync/shared";
+import { ClientActionEnum, MAIN_CONTEXT_ID, zoneDisplayName } from "@beatsync/shared";
 import { Check, ListPlus, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
