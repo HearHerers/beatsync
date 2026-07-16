@@ -12,7 +12,7 @@ import { motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
-import { FaDiscord, FaGithub } from "react-icons/fa";
+import { FaGithub } from "react-icons/fa";
 import { toast } from "sonner";
 import { ActiveRooms } from "./ActiveRooms";
 import { AnnouncementBanner } from "./AnnouncementBanner";
@@ -120,7 +120,7 @@ export const Join = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, delay: 0.13 }}
           >
-            Join a Beatsync Room
+            Join a HearHere Room
           </motion.h2>
 
           <motion.p
@@ -232,6 +232,21 @@ export const Join = () => {
                 className="px-5 py-2 bg-primary text-primary-foreground rounded-full font-medium text-sm tracking-wide cursor-pointer w-full hover:shadow-lg hover:shadow-zinc-50/50 transition-shadow duration-500 flex items-center justify-center"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
+                whileHover={{ scale: 1.015 }}
+                whileTap={{ scale: 0.985 }}
+                transition={{ duration: 0.3 }}
+                onClick={handleCreateMapRoom}
+                disabled={isJoining || isCreating}
+              >
+                <Map size={16} className="mr-2" />
+                <span>{isCreating ? "Creating..." : "Create HearHere room (geospatial)"}</span>
+              </motion.button>
+
+              <motion.button
+                type="button"
+                className="px-5 py-2 bg-neutral-800 text-white rounded-full font-medium text-sm tracking-wide cursor-pointer w-full hover:shadow-md hover:shadow-zinc-600/40 transition-shadow duration-500 flex items-center justify-center"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
                 whileHover={{
                   scale: 1.015,
                 }}
@@ -253,22 +268,7 @@ export const Join = () => {
                 ) : (
                   <PlusCircle size={16} className="mr-2" />
                 )}
-                <span>{isCreating ? "Creating..." : "Create new room"}</span>
-              </motion.button>
-
-              <motion.button
-                type="button"
-                className="px-5 py-2 bg-neutral-800 text-white rounded-full font-medium text-sm tracking-wide cursor-pointer w-full hover:shadow-md hover:shadow-zinc-600/40 transition-shadow duration-500 flex items-center justify-center"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                whileHover={{ scale: 1.015 }}
-                whileTap={{ scale: 0.985 }}
-                transition={{ duration: 0.3 }}
-                onClick={handleCreateMapRoom}
-                disabled={isJoining || isCreating}
-              >
-                <Map size={16} className="mr-2" />
-                <span>{isCreating ? "Creating..." : "Create HearHere room (geospatial)"}</span>
+                <span>{isCreating ? "Creating..." : "Create classic room"}</span>
               </motion.button>
 
               {/* <motion.button
@@ -325,16 +325,6 @@ export const Join = () => {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.4, delay: 0.6 }}
           >
-            <a
-              href={SOCIAL_LINKS.discord}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 text-neutral-400 hover:text-white transition-colors text-xs"
-            >
-              <FaDiscord className="size-[17px]" />
-              <span>Join Community</span>
-            </a>
-            <div className="w-px h-4 bg-neutral-700" />
             <a
               href={SOCIAL_LINKS.github}
               target="_blank"

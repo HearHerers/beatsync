@@ -43,7 +43,7 @@ export function exportPlaylistToFile(playlist: PlaylistType, opts: { roomId: str
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${(opts.label ?? "playlist").replace(/[^a-z0-9_-]+/gi, "-")}.beatsync.json`;
+  a.download = `${(opts.label ?? "playlist").replace(/[^a-z0-9_-]+/gi, "-")}.hearhere.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -63,7 +63,7 @@ export async function parsePlaylistFile(file: File): Promise<PlaylistExportType>
   }
   const result = PlaylistExportSchema.safeParse(raw);
   if (!result.success) {
-    throw new Error("Not a Beatsync playlist file (unexpected format).");
+    throw new Error("Not a valid playlist file (unexpected format).");
   }
   return result.data;
 }

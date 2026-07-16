@@ -33,7 +33,7 @@ export const MAP_CONSTANTS = {
   // Distance past the shape's edge over which audio fades from full to silent.
   // Inside the shape always plays at gain 1.0; outside falls off linearly until
   // it hits zero at falloffMeters beyond the nearest edge.
-  DEFAULT_FALLOFF_METERS: 25,
+  DEFAULT_FALLOFF_METERS: 5,
   MIN_FALLOFF_METERS: 0,
   MAX_FALLOFF_METERS: 5000,
   DEFAULT_BUFFER_CACHE_SIZE: 12,

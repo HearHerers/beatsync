@@ -9,7 +9,7 @@ import { Crown, Hash, Pencil, Users } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useState } from "react";
-import { FaDiscord, FaGithub } from "react-icons/fa";
+import { FaGithub } from "react-icons/fa";
 import { SyncProgress } from "../ui/SyncProgress";
 
 interface TopBarProps {
@@ -43,7 +43,7 @@ export const TopBar = ({ roomId, panelControls }: TopBarProps) => {
             </div>
           )}
           <Link href="/" className="font-medium hover:text-white transition-colors">
-            Beatsync
+            HearHere
           </Link>
 
           {/* NTP Measurements Indicator */}
@@ -101,15 +101,6 @@ export const TopBar = ({ roomId, panelControls }: TopBarProps) => {
 
         <div className="flex items-center justify-center gap-2.5">
           {panelControls}
-          {/* Discord icon */}
-          <a
-            href={SOCIAL_LINKS.discord}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-neutral-400 hover:text-white transition-colors"
-          >
-            <FaDiscord className="size-[17px]" />
-          </a>
           {/* GitHub icon in the top right */}
           <a
             href={SOCIAL_LINKS.github}

@@ -1,5 +1,6 @@
 "use client";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { emojiForId } from "@/lib/avatarEmoji";
 import { fetchDiscoverRooms } from "@/lib/api";
 import { generateName } from "@/lib/randomNames";
 import { cn, extractFileNameFromUrl, getOldestClient } from "@/lib/utils";
@@ -83,27 +84,16 @@ export const ActiveRooms = () => {
               onClick={() => handleJoinRoom(room.roomId)}
             >
               <div className="flex items-center gap-3">
-                {/* Flag indicator - show oldest user's flag */}
+                {/* Room avatar — oldest user's creature emoji (#98) */}
                 <div className="relative size-10 flex-shrink-0">
                   {(() => {
                     const oldestClient = getOldestClient(room.clients);
-                    const flagSvgURL = oldestClient.location?.flagSvgURL;
-                    const isPlaying = room.playbackState.type === "playing";
-
                     return (
-                      <div
-                        className={cn(
-                          "w-full h-full rounded flex items-center justify-center overflow-hidden",
-                          isPlaying && ""
-                        )}
-                      >
-                        {flagSvgURL ? (
-                          // eslint-disable-next-line @next/next/no-img-element -- external SVG flag URLs not compatible with next/image optimization
-                          <img src={flagSvgURL} alt="Country flag" className="w-full h-full object-cover" />
+                      <div className="w-full h-full rounded flex items-center justify-center overflow-hidden bg-neutral-800 text-2xl leading-none">
+                        {oldestClient ? (
+                          emojiForId(oldestClient.clientId)
                         ) : (
-                          <div className="w-full h-full bg-neutral-800 flex items-center justify-center">
-                            <Users2 className="w-5 h-5 text-neutral-600" />
-                          </div>
+                          <Users2 className="w-5 h-5 text-neutral-600" />
                         )}
                       </div>
                     );
@@ -151,16 +141,9 @@ export const ActiveRooms = () => {
                       <div className="flex -space-x-2.5">
                         {room.clients.slice(0, 5).map((client) => (
                           <Avatar key={client.clientId} className="size-[18px] ring-1 ring-black/60">
-                            {client.location?.flagSvgURL ? (
-                              <AvatarImage
-                                src={client.location.flagSvgURL}
-                                alt={`${client.location.country || "Country"} flag`}
-                              />
-                            ) : (
-                              <AvatarFallback className="bg-neutral-800">
-                                <Users2 className="w-2 h-2 text-neutral-500" />
-                              </AvatarFallback>
-                            )}
+                            <AvatarFallback className="bg-neutral-800 text-[10px] leading-none">
+                              {emojiForId(client.clientId)}
+                            </AvatarFallback>
                           </Avatar>
                         ))}
                       </div>
