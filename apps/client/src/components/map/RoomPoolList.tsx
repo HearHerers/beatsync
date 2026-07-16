@@ -6,10 +6,18 @@
 // Deliberately NOT the interactive Queue: clicking a main-context Queue row
 // schedules room-wide playback, which is not what browsing the pool means.
 // Rows here only offer "add to the selected zone" and (admins) "delete from
-// the room" — deletion removes the file everywhere, so it's a two-click
-// confirm.
+// the room" — deletion removes the file everywhere (pool + every zone + the
+// stored object), so it's gated behind a confirmation dialog.
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { extractFileNameFromUrl } from "@/lib/utils";
 import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
@@ -29,9 +37,8 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
   const shapes = useMapStore((s) => s.shapes);
   const selectedShapeId = useMapStore((s) => s.selectedShapeId);
   const zonePlaylist = useGlobalStore((s) => (selectedShapeId ? s.playlists.get(selectedShapeId) : undefined));
-  // URL awaiting delete confirmation; a second click on the same trash icon
-  // performs the delete, clicking anything else resets it.
-  const [pendingDeleteUrl, setPendingDeleteUrl] = useState<string | null>(null);
+  // URL pending delete confirmation; drives the confirmation dialog (null = closed).
+  const [deleteUrl, setDeleteUrl] = useState<string | null>(null);
 
   const shape = selectedShapeId ? shapes.get(selectedShapeId) : undefined;
   const zoneLabel = shape ? zoneDisplayName(shape) : null;
@@ -57,17 +64,13 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
     if (!shape) return;
     send({ type: ClientActionEnum.enum.ADD_TRACK_TO_CONTEXT, contextId: shape.id, source: { url } });
     toast.success(`Added to ${zoneLabel}`);
-    setPendingDeleteUrl(null);
   };
 
-  const handleDelete = (url: string) => {
-    if (pendingDeleteUrl !== url) {
-      setPendingDeleteUrl(url);
-      return;
-    }
-    send({ type: ClientActionEnum.enum.DELETE_AUDIO_SOURCES, urls: [url] });
+  const confirmDelete = () => {
+    if (!deleteUrl) return;
+    send({ type: ClientActionEnum.enum.DELETE_AUDIO_SOURCES, urls: [deleteUrl] });
     toast.success("Deleted from the room (removed from every zone).");
-    setPendingDeleteUrl(null);
+    setDeleteUrl(null);
   };
 
   const notYetInZone = tracks.filter((t) => !zoneUrls.has(t.url));
@@ -79,7 +82,6 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
       urls: notYetInZone.map((t) => t.url),
     });
     toast.success(`Adding ${notYetInZone.length} track${notYetInZone.length === 1 ? "" : "s"} to ${zoneLabel}…`);
-    setPendingDeleteUrl(null);
   };
 
   return (
@@ -92,7 +94,6 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
       {tracks.map((track) => {
         const name = safeTrackName(track.url);
         const inZone = zoneUrls.has(track.url);
-        const confirming = pendingDeleteUrl === track.url;
         return (
           <div
             key={track.url}
@@ -118,18 +119,10 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
                   type="button"
                   size="sm"
                   variant="ghost"
-                  className={`h-6 px-1 ${
-                    confirming
-                      ? "text-red-400"
-                      : "text-neutral-500 opacity-0 group-hover:opacity-100 hover:text-red-400"
-                  }`}
+                  className="h-6 px-1 text-neutral-500 opacity-0 group-hover:opacity-100 hover:text-red-400"
                   disabled={!isConnected}
-                  title={
-                    confirming
-                      ? "Click again to delete from the room AND every zone"
-                      : "Delete from the room (removes it from every zone)"
-                  }
-                  onClick={() => handleDelete(track.url)}
+                  title="Delete from the room (removes it from every zone)"
+                  onClick={() => setDeleteUrl(track.url)}
                 >
                   <Trash2 className="size-3.5" />
                 </Button>
@@ -152,6 +145,26 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
           Add all to {zoneLabel}
         </Button>
       )}
+
+      <Dialog open={deleteUrl !== null} onOpenChange={(open) => !open && setDeleteUrl(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="truncate">Delete “{deleteUrl ? safeTrackName(deleteUrl) : ""}”?</DialogTitle>
+            <DialogDescription>
+              Removes it from the room pool <span className="font-medium text-neutral-200">and every zone</span>, and
+              deletes the file. This can’t be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setDeleteUrl(null)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" onClick={confirmDelete}>
+              Delete everywhere
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
