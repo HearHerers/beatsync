@@ -140,6 +140,19 @@ function playShape(shapeId: string, audioSource: string, trackTimeSeconds: numbe
   // gate). Stash the play parameters; loadAudioForShape will replay once decode
   // completes.
   if (!chain.buffer || chain.url !== audioSource) {
+    // Switching to a different track: stop the current source NOW. Otherwise it
+    // keeps looping (source.loop) audibly while the new track decodes, so the UI
+    // shows the new track but you still hear the previous one (#97). A brief
+    // silence during decode is expected (and closed by the server timeline).
+    if (chain.url !== audioSource && chain.sourceNode) {
+      try {
+        chain.sourceNode.stop();
+      } catch {
+        /* already stopped */
+      }
+      chain.sourceNode.disconnect();
+      chain.sourceNode = undefined;
+    }
     chain.pendingPlay = { audioSource, trackTimeSeconds, targetServerTime };
     void loadAudioForShape(shapeId, audioSource);
     return;
