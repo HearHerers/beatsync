@@ -232,6 +232,21 @@ export const Join = () => {
                 className="px-5 py-2 bg-primary text-primary-foreground rounded-full font-medium text-sm tracking-wide cursor-pointer w-full hover:shadow-lg hover:shadow-zinc-50/50 transition-shadow duration-500 flex items-center justify-center"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
+                whileHover={{ scale: 1.015 }}
+                whileTap={{ scale: 0.985 }}
+                transition={{ duration: 0.3 }}
+                onClick={handleCreateMapRoom}
+                disabled={isJoining || isCreating}
+              >
+                <Map size={16} className="mr-2" />
+                <span>{isCreating ? "Creating..." : "Create HearHere room (geospatial)"}</span>
+              </motion.button>
+
+              <motion.button
+                type="button"
+                className="px-5 py-2 bg-neutral-800 text-white rounded-full font-medium text-sm tracking-wide cursor-pointer w-full hover:shadow-md hover:shadow-zinc-600/40 transition-shadow duration-500 flex items-center justify-center"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
                 whileHover={{
                   scale: 1.015,
                 }}
@@ -254,21 +269,6 @@ export const Join = () => {
                   <PlusCircle size={16} className="mr-2" />
                 )}
                 <span>{isCreating ? "Creating..." : "Create new room"}</span>
-              </motion.button>
-
-              <motion.button
-                type="button"
-                className="px-5 py-2 bg-neutral-800 text-white rounded-full font-medium text-sm tracking-wide cursor-pointer w-full hover:shadow-md hover:shadow-zinc-600/40 transition-shadow duration-500 flex items-center justify-center"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                whileHover={{ scale: 1.015 }}
-                whileTap={{ scale: 0.985 }}
-                transition={{ duration: 0.3 }}
-                onClick={handleCreateMapRoom}
-                disabled={isJoining || isCreating}
-              >
-                <Map size={16} className="mr-2" />
-                <span>{isCreating ? "Creating..." : "Create HearHere room (geospatial)"}</span>
               </motion.button>
 
               {/* <motion.button
