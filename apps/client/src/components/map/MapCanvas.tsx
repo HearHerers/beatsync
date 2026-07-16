@@ -205,6 +205,7 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   const selectedShapeId = useMapStore((s) => s.selectedShapeId);
   const ownPosition = useMapStore((s) => s.ownPosition);
   const setOwnPosition = useMapStore((s) => s.setOwnPosition);
+  const pendingRecenter = useMapStore((s) => s.pendingRecenter);
   const { clientId: myClientId } = useClientId();
 
   // Keep Leaflet's internal size cache in sync with the container. Required
@@ -487,6 +488,16 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
       mapRef.current.setView(mapMetadata.center, mapMetadata.zoom);
     }
   }, [mapMetadata]);
+
+  // Center on the user's own position when requested (#66 GPS-switch, #67 button).
+  // Waits until a position is actually available — arming the request before the
+  // first GPS fix lands is fine; this fires as soon as ownPosition appears.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!pendingRecenter || !map || !ownPosition) return;
+    map.flyTo([ownPosition.lat, ownPosition.lng], Math.max(map.getZoom(), 18), { duration: 0.6 });
+    useMapStore.getState().consumeRecenter();
+  }, [pendingRecenter, ownPosition]);
 
   // ── Sync shapes → Leaflet layers ────────────────────────────────
   useEffect(() => {

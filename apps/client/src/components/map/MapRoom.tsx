@@ -43,6 +43,7 @@ import {
   ChevronRight,
   ChevronUp,
   ListMusic,
+  LocateFixed,
   Map as MapIcon,
   MapPin,
   MessageCircle,
@@ -51,7 +52,7 @@ import {
   Users,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDefaultLayout, useGroupRef, usePanelRef, type GroupImperativeHandle } from "react-resizable-panels";
 import { EnsembleControls } from "./EnsembleControls";
 import { MapCanvas, useCanMutate } from "./MapCanvas";
@@ -168,10 +169,19 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
     stopWatching,
   } = useGeolocation({ enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 });
 
+  // Arm a one-shot "center on my location" for the next GPS fix whenever we
+  // enter GPS mode (#66). Consumed in the GPS→store effect below once a real
+  // fix lands, so we center on the GPS position rather than a stale manual one.
+  const centerOnNextFixRef = useRef(false);
+
   // Start/stop GPS watching based on locationMode.
   useEffect(() => {
-    if (locationMode === "gps") startWatching();
-    else stopWatching();
+    if (locationMode === "gps") {
+      centerOnNextFixRef.current = true;
+      startWatching();
+    } else {
+      stopWatching();
+    }
   }, [locationMode, startWatching, stopWatching]);
 
   // GPS → store + server.
@@ -179,6 +189,11 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
     if (locationMode !== "gps") return;
     if (latitude == null || longitude == null) return;
     setOwnPosition({ lat: latitude, lng: longitude });
+    // First fix after switching to GPS: center the map on it (#66).
+    if (centerOnNextFixRef.current) {
+      centerOnNextFixRef.current = false;
+      useMapStore.getState().requestRecenter();
+    }
     const ws = useGlobalStore.getState().socket;
     if (ws && ws.readyState === WebSocket.OPEN) {
       sendWSRequest({
@@ -823,6 +838,18 @@ const MapOverlays = ({
       >
         <MapPin className="mr-1 size-3" /> GPS
       </Button>
+      {locationMode === "gps" && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-[11px]"
+          onClick={() => useMapStore.getState().requestRecenter()}
+          disabled={!ownPosition}
+          title="Recenter map on my location"
+        >
+          <LocateFixed className="size-3" />
+        </Button>
+      )}
     </div>
 
     {locationMode === "gps" && (

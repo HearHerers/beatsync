@@ -42,6 +42,11 @@ interface MapStateValues {
 
   /** Which shape is currently selected (drives the per-shape playlist panel). */
   selectedShapeId: string | null;
+
+  /** When true, MapCanvas pans/zooms to the user's own position as soon as one
+   *  is available, then clears the flag. Set on the GPS recenter button (#67)
+   *  and when the first GPS fix arrives after switching to GPS mode (#66). */
+  pendingRecenter: boolean;
 }
 
 interface MapStoreActions {
@@ -58,6 +63,11 @@ interface MapStoreActions {
 
   setSelectedShapeId: (shapeId: string | null) => void;
 
+  /** Ask MapCanvas to center on the user's own position (once available). */
+  requestRecenter: () => void;
+  /** MapCanvas calls this after it has performed the recenter. */
+  consumeRecenter: () => void;
+
   reset: () => void;
 }
 
@@ -71,6 +81,7 @@ const initialState: MapStateValues = {
   locationMode: "manual",
   defaultFalloffMeters: 25,
   selectedShapeId: null,
+  pendingRecenter: false,
 };
 
 export const useMapStore = create<MapState>()((set) => ({
@@ -124,6 +135,9 @@ export const useMapStore = create<MapState>()((set) => ({
     }),
 
   setSelectedShapeId: (selectedShapeId) => set({ selectedShapeId }),
+
+  requestRecenter: () => set({ pendingRecenter: true }),
+  consumeRecenter: () => set({ pendingRecenter: false }),
 
   reset: () =>
     set(() => ({
