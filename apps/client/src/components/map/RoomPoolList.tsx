@@ -129,7 +129,7 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
   if (tracks.length === 0) {
     return (
       <div className="px-1 py-6 text-center text-xs text-neutral-500">
-        No tracks in the room pool yet.
+        No tracks in the Room Pool yet.
         {canMutate && <div className="mt-1 text-neutral-600">Upload above to make songs available to every zone.</div>}
       </div>
     );
@@ -201,7 +201,7 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
           <DialogHeader>
             <DialogTitle className="truncate">Delete “{deleteUrl ? safeTrackName(deleteUrl) : ""}”?</DialogTitle>
             <DialogDescription>
-              Removes it from the room pool <span className="font-medium text-neutral-200">and every zone</span>, and
+              Removes it from the Room Pool <span className="font-medium text-neutral-200">and every zone</span>, and
               deletes the file. This can’t be undone.
             </DialogDescription>
           </DialogHeader>
