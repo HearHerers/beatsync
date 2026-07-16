@@ -287,15 +287,6 @@ export function SearchResults({ className, onTrackSelect, contextId }: SearchRes
         >
           Start typing to search for music...
         </motion.h3>
-
-        <motion.p
-          className="text-neutral-400 text-center text-xs"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.3, delay: 0.15 }}
-        >
-          Experimental. Free while in beta.
-        </motion.p>
       </motion.div>
     );
   }

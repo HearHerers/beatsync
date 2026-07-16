@@ -26,10 +26,10 @@ import {
   handleRemoveTrackFromContext,
   handleReorderTrackInContext,
 } from "@/websocket/handlers/contextTracks";
-import { handleSetRoomName } from "@/websocket/handlers/setRoomName";
-import { handleSetUsername } from "@/websocket/handlers/setUsername";
 import { handlePauseAllContexts } from "@/websocket/handlers/pauseAllContexts";
 import { handlePlayAllContexts } from "@/websocket/handlers/playAllContexts";
+import { handleSetRoomName } from "@/websocket/handlers/setRoomName";
+import { handleSetUsername } from "@/websocket/handlers/setUsername";
 import { handleSetTrackBeatgrid, handleSyncZones } from "@/websocket/handlers/zoneSync";
 import { handleSync } from "@/websocket/handlers/sync";
 import {

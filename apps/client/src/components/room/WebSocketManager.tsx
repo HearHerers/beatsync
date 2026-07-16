@@ -316,27 +316,29 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
           processMetronomeConfig(scheduledAction);
         }
       } else if (response.type === "SEARCH_RESPONSE") {
-        console.log("Received search response:", response);
-        const { setSearchResults, setIsSearching, setIsLoadingMoreResults, setHasMoreResults, isLoadingMoreResults } =
-          useGlobalStore.getState();
+        const {
+          setSearchResults,
+          setIsSearching,
+          setIsLoadingMoreResults,
+          setHasMoreResults,
+          isLoadingMoreResults,
+          searchQuery,
+        } = useGlobalStore.getState();
 
-        // Determine if this is pagination or new search
-        const isAppending = isLoadingMoreResults;
-
-        // Update search results (append if pagination, replace if new search)
-        setSearchResults(response.response, isAppending);
-
-        // Update loading states
-        setIsSearching(false);
-        setIsLoadingMoreResults(false);
-
-        // Update hasMoreResults based on response
-        if (response.response.type === "success") {
-          const { total, items, offset } = response.response.response.data.tracks;
-          const hasMore = offset + items.length < total;
-          setHasMoreResults(hasMore);
-        } else {
-          setHasMoreResults(false);
+        // Drop stale / out-of-order responses. Search-as-you-type fires
+        // overlapping requests; only apply the one whose echoed query matches
+        // what's currently in the box (appends reuse the same query, so match).
+        if (response.query === searchQuery) {
+          const isAppending = isLoadingMoreResults;
+          setSearchResults(response.response, isAppending);
+          setIsSearching(false);
+          setIsLoadingMoreResults(false);
+          if (response.response.type === "success") {
+            const { total, items, offset } = response.response.response.data.tracks;
+            setHasMoreResults(offset + items.length < total);
+          } else {
+            setHasMoreResults(false);
+          }
         }
       } else if (response.type === "STREAM_JOB_UPDATE") {
         console.log("Received stream job update:", response.activeJobCount);

@@ -501,6 +501,10 @@ export class RoomManager {
     const filter = contextIds && contextIds.length > 0 ? new Set(contextIds) : undefined;
     const actions: PlayActionType[] = [];
     for (const playlist of this.playlists.values()) {
+      // In a map room the main context is the Room Pool — a superset library of
+      // every track (see the pool-invariant in addTrackToContext), not a
+      // playable zone — so never batch-play it. Audio rooms have only main.
+      if (this.isMapRoom() && playlist.id === MAIN_CONTEXT_ID) continue;
       if (filter && !filter.has(playlist.id)) continue;
       if (playlist.tracks.length === 0) continue;
       // Resume mode never restarts a context that's already running.
@@ -540,6 +544,8 @@ export class RoomManager {
     const filter = contextIds && contextIds.length > 0 ? new Set(contextIds) : undefined;
     const actions: PauseActionType[] = [];
     for (const playlist of this.playlists.values()) {
+      // See buildPlayAllActions: the map room's main context is the pool, not a zone.
+      if (this.isMapRoom() && playlist.id === MAIN_CONTEXT_ID) continue;
       if (filter && !filter.has(playlist.id)) continue;
       if (playlist.playback.type !== "playing") continue;
       actions.push({
@@ -1899,6 +1905,13 @@ export class RoomManager {
     if (!playlist.tracks.some((t) => t.url === source.url)) {
       playlist.tracks = [...playlist.tracks, source];
     }
+    // Pool invariant: the main context (Room Pool) is a superset of every
+    // zone's tracks — anything added to a zone is also registered in the pool,
+    // which is the single place a track is permanently deleted from. The
+    // contextId guard keeps the recursion one level deep.
+    if (contextId !== MAIN_CONTEXT_ID) {
+      this.addTrackToContext(MAIN_CONTEXT_ID, source);
+    }
     return playlist.tracks;
   }
 
@@ -1920,6 +1933,10 @@ export class RoomManager {
     }
     if (additions.length > 0) {
       playlist.tracks = [...playlist.tracks, ...additions];
+    }
+    // Pool invariant (see addTrackToContext): mirror zone imports into the pool.
+    if (contextId !== MAIN_CONTEXT_ID) {
+      this.addTracksToContext(MAIN_CONTEXT_ID, sources);
     }
     return playlist.tracks;
   }

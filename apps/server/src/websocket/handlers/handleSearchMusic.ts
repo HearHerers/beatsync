@@ -14,6 +14,7 @@ export const handleSearchMusic: HandlerFunction<ExtractWSRequestFrom["SEARCH_MUS
       ws,
       message: {
         type: "SEARCH_RESPONSE",
+        query: message.query,
         response: {
           type: "success",
           response: data,
@@ -26,6 +27,7 @@ export const handleSearchMusic: HandlerFunction<ExtractWSRequestFrom["SEARCH_MUS
       ws,
       message: {
         type: "SEARCH_RESPONSE",
+        query: message.query,
         response: {
           type: "error",
           message: "An error occurred while searching",

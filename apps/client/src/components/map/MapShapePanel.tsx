@@ -13,10 +13,17 @@
 //   - Ensemble play/pause — EnsembleControls in the bottom bar
 //   - Chat / user list — those still live in Right / Left
 
-import { AudioUploaderMinimal } from "@/components/AudioUploaderMinimal";
-import { InlineSearch } from "@/components/dashboard/InlineSearch";
 import { Queue } from "@/components/Queue";
+import { AddTracks } from "./AddTracks";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { matchBeatgridsToTracks, parseBeatgridFile } from "@/lib/beatgridFile";
@@ -26,7 +33,7 @@ import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { useRoomStore } from "@/store/room";
 import { sendWSRequest } from "@/utils/ws";
-import { ClientActionEnum, MAP_CONSTANTS, zoneDisplayName } from "@beatsync/shared";
+import { ClientActionEnum, MAIN_CONTEXT_ID, MAP_CONSTANTS, zoneDisplayName } from "@beatsync/shared";
 import { Download, Music2, Repeat, Trash2, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -53,8 +60,11 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
   const playlists = useGlobalStore((s) => s.playlists);
   const isConnected = useGlobalStore((s) => s.socket?.readyState === WebSocket.OPEN);
   const roomId = useRoomStore((s) => s.roomId);
+  const pool = useGlobalStore((s) => s.playlists.get(MAIN_CONTEXT_ID));
   const importInputRef = useRef<HTMLInputElement>(null);
   const beatgridInputRef = useRef<HTMLInputElement>(null);
+  const poolImportInputRef = useRef<HTMLInputElement>(null);
+  const [poolClearOpen, setPoolClearOpen] = useState(false);
 
   const shape = selectedShapeId ? shapes.get(selectedShapeId) : undefined;
 
@@ -129,8 +139,43 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
         console.log("[beatgrids] unmatched files:", unmatchedFiles);
       }
     } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not import beatgrids.");
+    }
+  };
+
+  const handlePoolExport = () => {
+    if (!pool || pool.tracks.length === 0) {
+      toast.error("The Room Pool has no tracks to export.");
+      return;
+    }
+    exportPlaylistToFile(pool, { roomId, label: "room-pool" });
+  };
+
+  const handlePoolImportFile = async (file: File) => {
+    try {
+      const doc = await parsePlaylistFile(file);
+      const urls = doc.tracks.map((t) => t.url);
+      if (urls.length === 0) {
+        toast.error("That playlist file has no tracks.");
+        return;
+      }
+      send({ type: ClientActionEnum.enum.IMPORT_TRACKS_TO_CONTEXT, contextId: MAIN_CONTEXT_ID, urls });
+      toast.success(`Importing ${urls.length} track${urls.length === 1 ? "" : "s"} to the Room Pool…`);
+    } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not import that file.");
     }
+  };
+
+  // Clear = delete every pool track. Because a pool track is one object
+  // referenced from many zones, this removes them from the pool AND every zone
+  // AND deletes the files — the whole room's audio. Confirmed via dialog.
+  const confirmPoolClear = () => {
+    const urls = (pool?.tracks ?? []).map((t) => t.url);
+    if (urls.length > 0) {
+      send({ type: ClientActionEnum.enum.DELETE_AUDIO_SOURCES, urls });
+      toast.success(`Cleared ${urls.length} track${urls.length === 1 ? "" : "s"} from the room.`);
+    }
+    setPoolClearOpen(false);
   };
 
   return (
@@ -141,7 +186,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
             Zone
           </TabsTrigger>
           <TabsTrigger value="pool" className="text-xs">
-            Room pool
+            Room Pool
           </TabsTrigger>
         </TabsList>
       </div>
@@ -161,13 +206,85 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
 
       <TabsContent value="pool" className="flex min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
         {canMutate && (
+          <div className="flex items-center justify-between gap-2 border-b border-neutral-800/50 px-4 py-3">
+            <div className="min-w-0 flex-1 text-xs font-medium text-neutral-300">Room Pool</div>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-1.5 text-neutral-500 hover:text-neutral-200"
+                title="Export the Room Pool"
+                disabled={!pool || pool.tracks.length === 0}
+                onClick={handlePoolExport}
+              >
+                <Download className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-1.5 text-neutral-500 hover:text-neutral-200"
+                title="Import a playlist into the Room Pool"
+                disabled={!isConnected}
+                onClick={() => poolImportInputRef.current?.click()}
+              >
+                <Upload className="size-3.5" />
+              </Button>
+              <input
+                ref={poolImportInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = ""; // allow re-importing the same file
+                  if (file) void handlePoolImportFile(file);
+                }}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-1.5 text-neutral-500 hover:text-red-400"
+                title="Clear the Room Pool (deletes every track from the room)"
+                disabled={!isConnected || !pool || pool.tracks.length === 0}
+                onClick={() => setPoolClearOpen(true)}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+        )}
+        {canMutate && (
           <div className="px-3 pt-3">
-            <AudioUploaderMinimal label="Upload to room pool" />
+            <AddTracks label="Upload to Room Pool" destination="Room Pool" />
           </div>
         )}
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-3 scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-muted-foreground/10 scrollbar-track-transparent hover:scrollbar-thumb-muted-foreground/20">
           <RoomPoolList canMutate={canMutate} />
         </div>
+
+        <Dialog open={poolClearOpen} onOpenChange={setPoolClearOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Clear the Room Pool?</DialogTitle>
+              <DialogDescription>
+                Deletes all {pool?.tracks.length ?? 0} track{(pool?.tracks.length ?? 0) === 1 ? "" : "s"} from the room
+                — removed from the pool <span className="font-medium text-neutral-200">and every zone</span>, and the
+                files are deleted. This can’t be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setPoolClearOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" variant="destructive" onClick={confirmPoolClear}>
+                Clear the room
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </TabsContent>
     </Tabs>
   );
@@ -387,11 +504,10 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
         )}
 
         {/* Provider search + uploader pinned above the queue. Search streams the
-          chosen track straight into this zone's playlist (contextId). */}
+            chosen track straight into this zone's playlist (contextId). */}
         {canMutate && (
-          <div className="flex flex-col gap-2 px-3 pt-3">
-            <InlineSearch contextId={shape.id} />
-            <AudioUploaderMinimal contextId={shape.id} label={`Upload to ${zoneDisplayName(shape)}`} />
+          <div className="px-3 pt-3">
+            <AddTracks contextId={shape.id} label={`Upload to ${zoneDisplayName(shape)}`} />
           </div>
         )}
 

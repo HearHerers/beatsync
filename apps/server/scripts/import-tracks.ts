@@ -66,10 +66,14 @@ async function getPresignedUrl(
 async function uploadFileBytes(roomId: string, filePath: string): Promise<string> {
   const fileName = basename(filePath);
   const contentType = contentTypeForFile(fileName)!; // collectAudioFiles only returns supported files
-  const presigned = await getPresignedUrl(roomId, fileName, contentType, Bun.file(filePath).size);
+  const bytes = await Bun.file(filePath).arrayBuffer();
+  const presigned = await getPresignedUrl(roomId, fileName, contentType, bytes.byteLength);
 
+  // Dedup: the server already has this exact file (display name + byte size) in
+  // the room, so it returns the existing object's URL and there's nothing to
+  // upload. Mirrors the client's uploadAudioFile (lib/api.ts).
   if ("existingUrl" in presigned) {
-    return presigned.existingUrl; // duplicate — reference the existing object
+    return presigned.existingUrl;
   }
 
   // Content-Type must match the presigned PutObjectCommand or the signature
@@ -78,7 +82,7 @@ async function uploadFileBytes(roomId: string, filePath: string): Promise<string
   const res = await fetch(presigned.uploadUrl, {
     method: "PUT",
     headers: { "content-type": contentType },
-    body: await Bun.file(filePath).arrayBuffer(),
+    body: bytes,
   });
   if (!res.ok) {
     throw new Error(`storage PUT returned ${res.status} ${res.statusText}`);
