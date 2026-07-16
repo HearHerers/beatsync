@@ -14,9 +14,13 @@ interface AudioUploaderMinimalProps {
   contextId?: string;
   /** Optional label override; default depends on whether contextId is set. */
   label?: string;
+  /** Noun for where uploads land when there's no contextId (e.g. "Room Pool").
+   *  Without it, the main-context copy calls the destination a "queue" (correct
+   *  for audio rooms, not for a map room's pool/library). */
+  destination?: string;
 }
 
-export const AudioUploaderMinimal = ({ contextId, label }: AudioUploaderMinimalProps = {}) => {
+export const AudioUploaderMinimal = ({ contextId, label, destination }: AudioUploaderMinimalProps = {}) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -125,7 +129,13 @@ export const AudioUploaderMinimal = ({ contextId, label }: AudioUploaderMinimalP
             </div>
             {!isUploading && !fileName && (
               <div className={cn("text-xs truncate", isDisabled ? "text-neutral-500" : "text-neutral-400")}>
-                {isDisabled ? "Must be an admin to upload" : contextId ? "Add to this zone" : "Add music to queue"}
+                {isDisabled
+                  ? "Must be an admin to upload"
+                  : contextId
+                    ? "Add to this zone"
+                    : destination
+                      ? `Add to the ${destination}`
+                      : "Add music to queue"}
               </div>
             )}
           </div>
@@ -161,7 +171,9 @@ export const AudioUploaderMinimal = ({ contextId, label }: AudioUploaderMinimalP
               try {
                 await registerAudioUrl({ url, roomId, contextId });
                 setUrlInput("");
-                toast.success(contextId ? "Added to zone" : "Audio URL added to queue");
+                toast.success(
+                  contextId ? "Added to zone" : destination ? `Added to the ${destination}` : "Audio URL added to queue"
+                );
               } catch (err) {
                 console.error(err);
                 toast.error("Failed to register URL");

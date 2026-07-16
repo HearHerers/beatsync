@@ -119,7 +119,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
       <TabsContent value="pool" className="flex min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
         {canMutate && (
           <div className="px-3 pt-3">
-            <AudioUploaderMinimal label="Upload to Room Pool" />
+            <AudioUploaderMinimal label="Upload to Room Pool" destination="Room Pool" />
           </div>
         )}
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-3 scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-muted-foreground/10 scrollbar-track-transparent hover:scrollbar-thumb-muted-foreground/20">
