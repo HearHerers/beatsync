@@ -47,6 +47,19 @@ export const NewSyncer = ({ roomId, requestedRoomType }: NewSyncerProps) => {
   // requested type so visitors don't see a flash of the wrong dashboard.
   const effectiveRoomType: RoomTypeValue = roomType ?? requestedRoomType ?? "audio";
 
+  // Keep the address bar canonical: once the server confirms the room's type,
+  // rewrite a mismatched URL prefix (e.g. joined a map room via /room/{id}) so
+  // refreshes and shared links land on the right route. history.replaceState
+  // instead of router.replace — a router navigation would remount the tree and
+  // drop the WebSocket connection.
+  useEffect(() => {
+    if (!roomType) return;
+    const canonicalPath = `/${roomType === "map" ? "map" : "room"}/${roomId}`;
+    if (window.location.pathname !== canonicalPath) {
+      window.history.replaceState(null, "", canonicalPath);
+    }
+  }, [roomType, roomId]);
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }}>
       {/* WebSocket connection manager (non-visual component) */}

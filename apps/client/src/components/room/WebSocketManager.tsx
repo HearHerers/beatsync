@@ -101,11 +101,16 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
   const adminParam = adminSecret ? `&admin=${encodeURIComponent(adminSecret)}` : "";
   const creatorParam = creatorSecret ? `&creator=${encodeURIComponent(creatorSecret)}` : "";
   const roomTypeParam = requestedRoomType ? `&roomType=${encodeURIComponent(requestedRoomType)}` : "";
+  // Shared-link elevation: ?roomAdminToken= on the PAGE URL wins over
+  // localStorage so a fresh device can join as co-curator. We don't persist it
+  // here — if the server accepts it, it unicasts SET_ADMIN_TOKEN back and the
+  // handler below stores it, so a bogus URL token never pollutes localStorage.
+  const urlRoomAdminToken = searchParams?.get("roomAdminToken") ?? null;
 
   const createConnection = () => {
     // Re-read the room's admin token each connect — it may have just been issued
     // (SET_ADMIN_TOKEN) so a reconnect re-presents it and keeps the curator admin.
-    const roomAdminToken = roomId ? getAdminToken(roomId) : null;
+    const roomAdminToken = urlRoomAdminToken ?? (roomId ? getAdminToken(roomId) : null);
     const adminTokenParam = roomAdminToken ? `&roomAdminToken=${encodeURIComponent(roomAdminToken)}` : "";
     const SOCKET_URL = `${getWsUrl()}?roomId=${roomId}&username=${username}&clientId=${clientId}${adminParam}${creatorParam}${roomTypeParam}${adminTokenParam}`;
     console.log("Creating new WS connection to", SOCKET_URL);
@@ -212,9 +217,12 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
           // Authoritative room-type info from the server. Wins over the URL hint.
           useRoomStore.getState().setRoomType(event.roomType);
           if (event.mapMetadata) useRoomStore.getState().setMapMetadata(event.mapMetadata);
+          useRoomStore.getState().setRoomName(event.roomName);
           if (event.defaultTileLayerId) useRoomStore.getState().setDefaultTileLayerId(event.defaultTileLayerId);
         } else if (event.type === "MAP_METADATA_UPDATE") {
           useRoomStore.getState().setMapMetadata(event.metadata);
+        } else if (event.type === "ROOM_NAME_UPDATE") {
+          useRoomStore.getState().setRoomName(event.roomName);
         } else if (event.type === "DEFAULT_TILE_LAYER_UPDATE") {
           useRoomStore.getState().setDefaultTileLayerId(event.tileLayerId);
         } else if (event.type === "SHAPES_UPDATE") {

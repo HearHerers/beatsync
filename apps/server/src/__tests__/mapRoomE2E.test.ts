@@ -224,4 +224,31 @@ describe("map-room E2E", () => {
     await send(visitorWs, server, { type: "ADD_SHAPE", shape: makeShape("jam-shape") });
     expect(globalManager.getRoom(ROOM_ID)?.getShape("jam-shape")).toBeTruthy();
   });
+
+  it("joining an existing idle map room with requestedRoomType=audio does not flip its type", () => {
+    const server = createMockServer();
+
+    // Existing map room with zero connections — rooms are persistent, so this is
+    // the normal state of a map room between sessions.
+    const room = globalManager.getOrCreateRoom(ROOM_ID);
+    room.setRoomType("map");
+
+    // Splash-screen join routes through /room/{id}, which requests type "audio".
+    const joinerWs = createMockWs({ clientId: "joiner", roomId: ROOM_ID });
+    joinerWs.data.requestedRoomType = "audio";
+    handleOpen(joinerWs, server);
+
+    expect(room.getRoomType()).toBe("map");
+
+    // The joiner is told the room's real type so the client mounts the map UI.
+    const sentMessages = (joinerWs.send as ReturnType<typeof mock>).mock.calls.map(
+      (c: unknown[]) => JSON.parse(c[0] as string) as WSBroadcastType
+    );
+    const typeInfo = sentMessages.find(
+      (m): m is Extract<WSBroadcastType, { type: "ROOM_EVENT" }> =>
+        m.type === "ROOM_EVENT" && m.event.type === "ROOM_TYPE_INFO"
+    );
+    if (typeInfo?.event.type !== "ROOM_TYPE_INFO") throw new Error("ROOM_TYPE_INFO not sent");
+    expect(typeInfo.event.roomType).toBe("map");
+  });
 });
