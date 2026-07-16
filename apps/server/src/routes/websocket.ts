@@ -53,7 +53,9 @@ export const handleWebSocketUpgrade = (req: Request, server: BunServer) => {
 
   const data: WSData = {
     roomId,
-    username: isCreator ? "freemanjiang" : username,
+    // Use the client's chosen name for everyone, including the creator. (This
+    // used to be force-set to a hardcoded name for the creator — a leftover.)
+    username,
     clientId,
     isAdmin,
     isCreator,

@@ -1,14 +1,16 @@
 "use client";
 import { generateName } from "@/lib/randomNames";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { hasConfirmedUsername, loadSavedUsername, markUsernameConfirmed } from "@/lib/username";
 import { useRoomStore } from "@/store/room";
 import type { RoomTypeValue } from "@beatsync/shared";
 import { motion } from "motion/react";
 import dynamic from "next/dynamic";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { IS_DEMO_MODE } from "@/lib/demo";
 import { Dashboard } from "./dashboard/Dashboard";
 import { DemoDashboard } from "./dashboard/DemoDashboard";
+import { RoomJoinGate } from "./room/RoomJoinGate";
 import { WebSocketManager } from "./room/WebSocketManager";
 
 // Leaflet is browser-only — dynamic-import the map shell with ssr:false to keep Next's
@@ -34,13 +36,20 @@ export const NewSyncer = ({ roomId, requestedRoomType }: NewSyncerProps) => {
   // Update document title based on playback state
   useDocumentTitle();
 
-  // Generate a new random username when the component mounts
+  // Whether we've checked localStorage yet, and whether we still need to prompt
+  // for a name (#68). null until checked so we don't flash the room or the gate.
+  const [needsName, setNeedsName] = useState<boolean | null>(null);
+
+  // Seed the username (saved name → else a random suggestion) and decide whether
+  // to show the join gate. Store writes are fine in the effect body; React state
+  // is deferred via queueMicrotask to avoid the set-state-in-effect lint.
   useEffect(() => {
     setRoomId(roomId);
     setRequestedRoomType(requestedRoomType);
     if (!username) {
-      setUsername(generateName());
+      setUsername(loadSavedUsername() ?? generateName());
     }
+    queueMicrotask(() => setNeedsName(!hasConfirmedUsername()));
   }, [setUsername, username, roomId, setRoomId, requestedRoomType, setRequestedRoomType]);
 
   // Until ROOM_TYPE_INFO arrives, render the "most likely" UI based on the URL's
@@ -59,6 +68,25 @@ export const NewSyncer = ({ roomId, requestedRoomType }: NewSyncerProps) => {
       window.history.replaceState(null, "", canonicalPath);
     }
   }, [roomType, roomId]);
+
+  // Still checking localStorage — render nothing to avoid a flash of either UI.
+  if (needsName === null) return null;
+
+  // First join via a shared link (no confirmed name yet): prompt before connecting
+  // so the server gets the chosen name from the start.
+  if (needsName) {
+    return (
+      <RoomJoinGate
+        roomId={roomId}
+        initialName={username}
+        onJoin={(name) => {
+          setUsername(name);
+          markUsernameConfirmed(name);
+          setNeedsName(false);
+        }}
+      />
+    );
+  }
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }}>

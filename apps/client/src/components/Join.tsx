@@ -5,6 +5,7 @@ import { SOCIAL_LINKS } from "@/constants";
 import { fetchActiveRooms } from "@/lib/api";
 import { generateName } from "@/lib/randomNames";
 import { validateFullRoomId, validatePartialRoomId } from "@/lib/room";
+import { markUsernameConfirmed } from "@/lib/username";
 import { useRoomStore } from "@/store/room";
 import { useQuery } from "@tanstack/react-query";
 import { Map, PlusCircle } from "lucide-react";
@@ -61,15 +62,14 @@ export const Join = () => {
       return;
     }
 
-    console.log("Joining room with data:", {
-      roomId: data.roomId,
-      username,
-    });
+    // The name was picked here, so remember it and skip the in-room name gate (#68).
+    if (username.trim()) markUsernameConfirmed(username.trim());
     router.push(`/room/${data.roomId}`);
   };
 
   const handleCreateRoom = () => {
     setIsCreating(true);
+    if (username.trim()) markUsernameConfirmed(username.trim());
 
     // Generate a random 6-digit room ID
     const newRoomId = Math.floor(100000 + Math.random() * 900000).toString();
@@ -79,6 +79,7 @@ export const Join = () => {
 
   const handleCreateMapRoom = () => {
     setIsCreating(true);
+    if (username.trim()) markUsernameConfirmed(username.trim());
     const newRoomId = Math.floor(100000 + Math.random() * 900000).toString();
     router.push(`/map/${newRoomId}`);
   };
