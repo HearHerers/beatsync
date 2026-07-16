@@ -26,6 +26,8 @@ import {
   handleRemoveTrackFromContext,
   handleReorderTrackInContext,
 } from "@/websocket/handlers/contextTracks";
+import { handlePauseAllContexts } from "@/websocket/handlers/pauseAllContexts";
+import { handlePlayAllContexts } from "@/websocket/handlers/playAllContexts";
 import { handleSetRoomName } from "@/websocket/handlers/setRoomName";
 import { handleSetUsername } from "@/websocket/handlers/setUsername";
 import { handleSync } from "@/websocket/handlers/sync";
@@ -164,6 +166,14 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.IMPORT_TRACKS_TO_CONTEXT]: {
     handle: handleImportTracksToContext,
     description: "Bulk-add tracks from an imported playlist file to a context",
+  },
+  [ClientActionEnum.enum.PLAY_ALL_CONTEXTS]: {
+    handle: handlePlayAllContexts,
+    description: "Start every eligible playlist context with one shared serverTimeToExecute",
+  },
+  [ClientActionEnum.enum.PAUSE_ALL_CONTEXTS]: {
+    handle: handlePauseAllContexts,
+    description: "Pause every currently-playing playlist context with one shared serverTimeToExecute",
   },
 
   // ── Map-room handlers ─────────────────────────────────────────────
