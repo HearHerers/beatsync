@@ -251,15 +251,15 @@ export const SyncProgress = ({ isLoading = false, loadingMessage = "Loading..." 
             transition={{ duration: 0.3, delay: 0.3 }}
           >
             {
-              "You might have a spotty connection or a new deployment is in progress. If this issue persists, please report it on the "
+              "You might have a spotty connection or a new deployment is in progress. If this issue persists, please report it on "
             }
             <a
-              href={SOCIAL_LINKS.discord}
+              href={SOCIAL_LINKS.github}
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary/75 underline"
             >
-              Discord
+              GitHub
             </a>
             .
           </motion.p>
@@ -375,7 +375,7 @@ export const SyncProgress = ({ isLoading = false, loadingMessage = "Loading..." 
           transition={{ duration: 0.3, delay: 0.1 }}
         >
           <WsStatusDot wsReadyState={wsReadyState} />
-          Beatsync calibrating
+          HearHere calibrating
         </motion.h2>
 
         <motion.p
