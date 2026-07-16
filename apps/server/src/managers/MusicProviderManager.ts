@@ -32,6 +32,8 @@ export class MusicProviderManager {
   private providerType: ProviderType;
   private navidromeUser: string | undefined;
   private navidromePassword: string | undefined;
+  private navidromeStreamFormat: string;
+  private navidromeStreamMaxBitRate: string;
 
   constructor() {
     // Lazy initialization - don't throw in constructor for test compatibility
@@ -39,6 +41,10 @@ export class MusicProviderManager {
     this.providerType = (process.env.PROVIDER_TYPE ?? "qobuz").toLowerCase() as ProviderType;
     this.navidromeUser = process.env.NAVIDROME_USER;
     this.navidromePassword = process.env.NAVIDROME_PASSWORD;
+    // Transcode target for Navidrome streams (see streamNavidrome). "raw"
+    // disables transcoding and fetches the untouched original file.
+    this.navidromeStreamFormat = (process.env.NAVIDROME_STREAM_FORMAT ?? "mp3").toLowerCase();
+    this.navidromeStreamMaxBitRate = process.env.NAVIDROME_STREAM_MAX_BITRATE ?? "320";
   }
 
   private getProviderUrl(): string {
@@ -214,20 +220,32 @@ export class MusicProviderManager {
     }
   }
 
-  // Not async: building the signed download URL is synchronous (the server-side
+  // Not async: building the signed stream URL is synchronous (the server-side
   // fetch happens later in handleStreamMusic). Returns a value that `stream()`'s
   // Promise wraps, matching the async streamQobuz branch.
   private streamNavidrome(trackId: string) {
     try {
       const { id } = TrackParamsSchema.parse({ id: trackId });
 
-      // Use /rest/download for the untouched original file (no transcoding), so
-      // beatsync gets full-quality audio for sync-accurate playback. The token
-      // is baked into this localhost URL; handleStreamMusic fetches it server
+      // Ask Navidrome to transcode (default mp3 @ 320kbps) instead of serving
+      // the untouched original. Originals are often FLAC — 30-90 MB per track —
+      // which makes every zone play wait on a huge download + decode in each
+      // listener's browser before any sound, and ogg/opus originals don't
+      // decode in Safari at all. Every client receives the SAME re-hosted
+      // bytes, so cross-client sync is unaffected by transcoding.
+      //
+      // NAVIDROME_STREAM_FORMAT=raw restores the original-file behavior
+      // (Subsonic treats format=raw on /rest/stream as "no transcoding").
+      // NAVIDROME_STREAM_MAX_BITRATE tunes the target bitrate (default 320).
+      // The token is baked into this URL; handleStreamMusic fetches it server
       // side and re-hosts the bytes to object storage, so it never reaches a
       // browser.
-      const params = this.subsonicParams({ id });
-      const url = `${this.getProviderUrl()}/rest/download?${params.toString()}`;
+      const params = this.subsonicParams({
+        id,
+        format: this.navidromeStreamFormat,
+        ...(this.navidromeStreamFormat !== "raw" && { maxBitRate: this.navidromeStreamMaxBitRate }),
+      });
+      const url = `${this.getProviderUrl()}/rest/stream?${params.toString()}`;
 
       return StreamResponseSchema.parse({ success: true, data: { url } });
     } catch (error) {
