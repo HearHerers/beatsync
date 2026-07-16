@@ -3,11 +3,11 @@
 // shared pool (it's what room-wide uploads and the server-side bulk import
 // fill), so this reads playlists.get(MAIN_CONTEXT_ID) straight from the store.
 //
-// Deliberately NOT the interactive Queue: clicking a main-context Queue row
-// schedules room-wide playback, which is not what browsing the pool means.
-// Rows here only offer "add to the selected zone" and (admins) "delete from
-// the room" — deletion removes the file everywhere (pool + every zone + the
-// stored object), so it's gated behind a confirmation dialog.
+// Rows use the shared PlaylistRow (same look + drag-reorder as zone playlists),
+// but with pool semantics via PoolRow: play = local preview (unsynced), plus
+// "add to the selected zone" and "delete from the room". Deletion removes the
+// file everywhere (pool + every zone + the stored object), so it's gated behind
+// a confirmation dialog.
 
 import { Button } from "@/components/ui/button";
 import {
@@ -19,13 +19,26 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { extractFileNameFromUrl } from "@/lib/utils";
-import { useGlobalStore } from "@/store/global";
+import { usePreviewPlayer } from "@/lib/previewPlayer";
+import { AudioSourceState, useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { sendWSRequest } from "@/utils/ws";
 import { ClientActionEnum, MAIN_CONTEXT_ID, zoneDisplayName } from "@beatsync/shared";
-import { Check, ListPlus, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import {
+  closestCenter,
+  DndContext,
+  DragEndEvent,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { restrictToVerticalAxis, restrictToWindowEdges } from "@dnd-kit/modifiers";
+import { arrayMove, SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { ListPlus } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { PoolRow } from "./PoolRow";
 
 interface RoomPoolListProps {
   canMutate: boolean;
@@ -33,32 +46,33 @@ interface RoomPoolListProps {
 
 export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
   const pool = useGlobalStore((s) => s.playlists.get(MAIN_CONTEXT_ID));
+  const audioSources = useGlobalStore((s) => s.audioSources);
   const isConnected = useGlobalStore((s) => s.socket?.readyState === WebSocket.OPEN);
+  const broadcastReorder = useGlobalStore((s) => s.broadcastReorder);
   const shapes = useMapStore((s) => s.shapes);
   const selectedShapeId = useMapStore((s) => s.selectedShapeId);
   const zonePlaylist = useGlobalStore((s) => (selectedShapeId ? s.playlists.get(selectedShapeId) : undefined));
   // URL pending delete confirmation; drives the confirmation dialog (null = closed).
   const [deleteUrl, setDeleteUrl] = useState<string | null>(null);
 
+  // Stop any local preview when the pool list goes away (leaving the room).
+  useEffect(() => () => usePreviewPlayer.getState().stop(), []);
+
   const shape = selectedShapeId ? shapes.get(selectedShapeId) : undefined;
   const zoneLabel = shape ? zoneDisplayName(shape) : null;
   const zoneUrls = new Set((zonePlaylist?.tracks ?? []).map((t) => t.url));
   const tracks = pool?.tracks ?? [];
+
+  // Project pool tracks into AudioSourceState (loading/error state, when known,
+  // comes from the global registry) so they render through the shared row.
+  const byUrl = new Map(audioSources.map((as) => [as.source.url, as]));
+  const items: AudioSourceState[] = tracks.map((t) => byUrl.get(t.url) ?? { source: t, status: "idle" });
 
   const send = (req: Parameters<typeof sendWSRequest>[0]["request"]) => {
     const socket = useGlobalStore.getState().socket;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     sendWSRequest({ ws: socket, request: req });
   };
-
-  if (tracks.length === 0) {
-    return (
-      <div className="px-1 py-6 text-center text-xs text-neutral-500">
-        No tracks in the room pool yet.
-        {canMutate && <div className="mt-1 text-neutral-600">Upload above to make songs available to every zone.</div>}
-      </div>
-    );
-  }
 
   const handleAdd = (url: string) => {
     if (!shape) return;
@@ -84,6 +98,46 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
     toast.success(`Adding ${notYetInZone.length} track${notYetInZone.length === 1 ? "" : "s"} to ${zoneLabel}…`);
   };
 
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    if (!canMutate) return;
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = items.findIndex((it) => it.source.url === active.id);
+    const newIndex = items.findIndex((it) => it.source.url === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const orderedUrls = arrayMove(items, oldIndex, newIndex).map((it) => it.source.url);
+    broadcastReorder(MAIN_CONTEXT_ID, orderedUrls);
+  };
+
+  if (tracks.length === 0) {
+    return (
+      <div className="px-1 py-6 text-center text-xs text-neutral-500">
+        No tracks in the room pool yet.
+        {canMutate && <div className="mt-1 text-neutral-600">Upload above to make songs available to every zone.</div>}
+      </div>
+    );
+  }
+
+  const rows = items.map((sourceState, index) => (
+    <PoolRow
+      key={sourceState.source.url}
+      sourceState={sourceState}
+      index={index}
+      canMutate={canMutate}
+      isConnected={isConnected}
+      inZone={zoneUrls.has(sourceState.source.url)}
+      zoneLabel={zoneLabel}
+      hasShape={Boolean(shape)}
+      onAddToZone={handleAdd}
+      onRequestDelete={setDeleteUrl}
+    />
+  ));
+
   return (
     <div className="flex flex-col gap-0.5">
       {!shape && (
@@ -91,46 +145,22 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
           Select a zone on the map to add pool tracks to its playlist.
         </div>
       )}
-      {tracks.map((track) => {
-        const name = safeTrackName(track.url);
-        const inZone = zoneUrls.has(track.url);
-        return (
-          <div
-            key={track.url}
-            className="group flex items-center gap-1.5 rounded-md px-2 py-1.5 hover:bg-neutral-800/50"
-          >
-            <div className="min-w-0 flex-1 truncate text-xs text-neutral-200" title={name}>
-              {name}
-            </div>
-            {canMutate && (
-              <>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className={`h-6 px-1 ${inZone ? "text-green-500" : "text-neutral-400 hover:text-white"}`}
-                  disabled={!isConnected || !shape || inZone}
-                  title={!shape ? "Select a zone first" : inZone ? `Already in ${zoneLabel}` : `Add to ${zoneLabel}`}
-                  onClick={() => handleAdd(track.url)}
-                >
-                  {inZone ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 px-1 text-neutral-500 opacity-0 group-hover:opacity-100 hover:text-red-400"
-                  disabled={!isConnected}
-                  title="Delete from the room (removes it from every zone)"
-                  onClick={() => setDeleteUrl(track.url)}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
-              </>
-            )}
-          </div>
-        );
-      })}
+
+      {canMutate ? (
+        <DndContext
+          sensors={sensors}
+          onDragEnd={handleDragEnd}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVerticalAxis, restrictToWindowEdges]}
+        >
+          <SortableContext items={items.map((it) => it.source.url)} strategy={verticalListSortingStrategy}>
+            {rows}
+          </SortableContext>
+        </DndContext>
+      ) : (
+        rows
+      )}
+
       {canMutate && shape && (
         <Button
           type="button"
