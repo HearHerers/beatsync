@@ -346,9 +346,42 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
       }, 1500);
     });
 
+    // "Set default map view" — saves the current center + zoom as the room's
+    // default so everyone (and future joiners) opens to the party's location
+    // instead of the build default (#64). Same injection pattern as above.
+    const viewWrap = L.DomUtil.create("div", "", list as HTMLElement);
+    const viewBtn = L.DomUtil.create("button", "", viewWrap) as HTMLButtonElement;
+    viewBtn.type = "button";
+    viewBtn.textContent = "Set default map view";
+    viewBtn.title = "Save the current center + zoom as the room's default view for everyone";
+    viewBtn.style.cssText =
+      "display:block;width:100%;margin-top:4px;padding:4px 6px;font-size:11px;line-height:1.2;cursor:pointer;" +
+      "border:1px solid #ccc;border-radius:3px;background:#f4f4f4;color:#222;";
+    L.DomEvent.disableClickPropagation(viewWrap);
+    L.DomEvent.on(viewBtn, "click", (ev) => {
+      L.DomEvent.preventDefault(ev);
+      const map = mapRef.current;
+      const ws = useGlobalStore.getState().socket;
+      if (!map || !ws || ws.readyState !== WebSocket.OPEN) return;
+      const c = map.getCenter();
+      sendWSRequest({
+        ws,
+        request: {
+          type: ClientActionEnum.enum.SET_MAP_METADATA,
+          // MapMetadataSchema caps zoom at 22 (map allows up to 23 for placement).
+          metadata: { center: [c.lat, c.lng], zoom: Math.min(22, Math.round(map.getZoom())) },
+        },
+      });
+      viewBtn.textContent = "✓ Saved for everyone";
+      setTimeout(() => {
+        viewBtn.textContent = "Set default map view";
+      }, 1500);
+    });
+
     return () => {
       separator.remove();
       wrap.remove();
+      viewWrap.remove();
     };
   }, [canMutate]);
 
