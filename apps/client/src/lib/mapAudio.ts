@@ -286,7 +286,24 @@ function playShape(
 
 function pauseShape(shapeId: string): void {
   const chain = chains.get(shapeId);
-  if (!chain?.sourceNode) return;
+  if (!chain) return;
+  // Clear any pending play that's waiting on decode / NTP / autoplay-unlock.
+  // Without this, pressing pause during the URL-change decode interval would
+  // let the queued play fire once decode finishes — audio plays despite the
+  // user having paused. Also clear the NTP / context-state waiters so they
+  // don't trigger after pause.
+  chain.pendingPlay = undefined;
+  const ntpWaiter = ntpWaiters.get(shapeId);
+  if (ntpWaiter) {
+    clearInterval(ntpWaiter);
+    ntpWaiters.delete(shapeId);
+  }
+  const ctxWaiter = ctxWaiters.get(shapeId);
+  if (ctxWaiter) {
+    audioContextManager.getContext().removeEventListener("statechange", ctxWaiter);
+    ctxWaiters.delete(shapeId);
+  }
+  if (!chain.sourceNode) return;
   stopSource(chain.sourceNode);
   chain.sourceNode = undefined;
 }

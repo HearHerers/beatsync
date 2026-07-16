@@ -232,6 +232,22 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
           // reads via the existing audioSources/playbackState path; map-room
           // UI (and any future multi-context UI) reads per-context tracks from
           // state.playlists.
+          //
+          // Before swapping in the new snapshot, find any context whose
+          // playback transitioned from playing → paused (e.g. server-side
+          // REMOVE_TRACK_FROM_CONTEXT cleared the playing track) and stop the
+          // matching mapAudio chain. Without this, removing the playing track
+          // leaves the source node running locally even though the UI shows
+          // paused.
+          const previousPlaylists = useGlobalStore.getState().playlists;
+          for (const incoming of event.playlists) {
+            const prev = previousPlaylists.get(incoming.id);
+            const wasPlaying = prev?.playbackState.type === "playing";
+            const nowPaused = incoming.playbackState.type !== "playing";
+            if (wasPlaying && nowPaused) {
+              mapAudio.pauseShape(incoming.id);
+            }
+          }
           useGlobalStore.getState().setPlaylists(event.playlists);
         } else if (event.type === "CONTEXT_LOOP_UPDATE") {
           useGlobalStore.getState().setContextLoop(event.contextId, event.loop);
