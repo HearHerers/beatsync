@@ -169,7 +169,7 @@ export const AudioUploaderMinimal = ({
             type="url"
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
-            placeholder="…or paste an audio URL"
+            placeholder={only === "url" ? "Paste an audio URL" : "…or paste an audio URL"}
             className="min-w-0 flex-1 bg-transparent text-xs text-white placeholder:text-neutral-500 focus:outline-none"
             disabled={isRegisteringUrl}
             onKeyDown={async (e) => {

@@ -25,6 +25,12 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
   const [showResults, setShowResults] = React.useState(false);
   const [isFocused, setIsFocused] = React.useState(false);
   const [showCheckmark, setShowCheckmark] = React.useState(false);
+  // Platform-aware modifier label for the ⌘K/Ctrl+K shortcut. Detected after
+  // mount to avoid an SSR hydration mismatch (default to Ctrl, the common case).
+  const [isMac, setIsMac] = React.useState(false);
+  React.useEffect(() => {
+    setIsMac(/mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent));
+  }, []);
   const isMobile = useIsMobile();
   const blurTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const canMutate = useCanMutate();
@@ -33,6 +39,7 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
   const setSearchQuery = useGlobalStore((state) => state.setSearchQuery);
   const setSearchOffset = useGlobalStore((state) => state.setSearchOffset);
   const setHasMoreResults = useGlobalStore((state) => state.setHasMoreResults);
+  const clearSearchResults = useGlobalStore((state) => state.clearSearchResults);
   const searchResults = useGlobalStore((state) => state.searchResults);
   const isSearching = useGlobalStore((state) => state.isSearching);
   const activeStreamJobs = useGlobalStore((state) => state.activeStreamJobs);
@@ -88,42 +95,37 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [setFocus, isFocused, canMutate, showResults]);
 
-  // Dismiss search results when input becomes empty
+  const runSearch = React.useCallback(
+    (raw: string) => {
+      if (!canMutate || !socket) return;
+      const query = raw.trim();
+      if (!query) return;
+      // New query: reset pagination, show loading + the results dropdown.
+      setSearchOffset(0);
+      setHasMoreResults(false);
+      setIsSearching(true);
+      setSearchQuery(query);
+      setShowResults(true);
+      sendWSRequest({ ws: socket, request: { type: ClientActionEnum.enum.SEARCH_MUSIC, query } });
+    },
+    [canMutate, socket, setSearchOffset, setHasMoreResults, setIsSearching, setSearchQuery]
+  );
+
+  // Search-as-you-type: debounce the live query. <2 chars clears the results.
   React.useEffect(() => {
-    if (!watchedQuery || watchedQuery.trim() === "") {
+    const q = watchedQuery?.trim() ?? "";
+    if (q.length < 2) {
       setShowResults(false);
-    }
-  }, [watchedQuery]);
-
-  const onSubmit = (data: SearchForm) => {
-    if (!canMutate) {
+      setSearchQuery("");
+      clearSearchResults();
       return;
     }
+    const timer = setTimeout(() => runSearch(q), 250);
+    return () => clearTimeout(timer);
+  }, [watchedQuery, runSearch, clearSearchResults, setSearchQuery]);
 
-    if (!socket) {
-      console.error("WebSocket not connected");
-      return;
-    }
-
-    if (!data.query || !data.query.trim()) return;
-
-    console.log("Sending search request", data.query);
-
-    // Reset pagination state for new search and set loading state
-    setSearchOffset(0);
-    setHasMoreResults(false);
-    setIsSearching(true);
-    setSearchQuery(data.query);
-    setShowResults(true);
-
-    sendWSRequest({
-      ws: socket,
-      request: {
-        type: ClientActionEnum.enum.SEARCH_MUSIC,
-        query: data.query,
-      },
-    });
-  };
+  // Enter runs the search immediately (skips the debounce wait).
+  const onSubmit = (data: SearchForm) => runSearch(data.query);
 
   const handleTrackSelection = () => {
     // Show checkmark animation
@@ -294,7 +296,7 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
                       canMutate ? "text-neutral-400" : "text-neutral-600 opacity-50"
                     )}
                   >
-                    <span className="text-xs">⌘</span>K
+                    <span className="text-xs">{isMac ? "⌘" : "Ctrl"}</span>K
                   </kbd>
                 </motion.div>
               )}
