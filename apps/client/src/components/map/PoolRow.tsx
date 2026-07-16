@@ -16,6 +16,7 @@ export const PoolRow = ({
   canMutate,
   isConnected,
   inZone,
+  zoneCount,
   zoneLabel,
   hasShape,
   onAddToZone,
@@ -26,6 +27,8 @@ export const PoolRow = ({
   canMutate: boolean;
   isConnected: boolean;
   inZone: boolean;
+  /** Total zones this track is in (excludes the pool itself). */
+  zoneCount: number;
   zoneLabel: string | null;
   hasShape: boolean;
   onAddToZone: (url: string) => void;
@@ -34,6 +37,10 @@ export const PoolRow = ({
   const url = sourceState.source.url;
   const previewing = usePreviewPlayer((s) => s.url === url);
   const toggle = usePreviewPlayer((s) => s.toggle);
+  // Show the count when the track is in a zone OTHER than the current selection
+  // (so: plus + count when not in this zone; check + count when in this zone but
+  // also elsewhere; nothing when only here or nowhere).
+  const showZoneCount = zoneCount - (inZone ? 1 : 0) > 0;
 
   return (
     <PlaylistRow
@@ -48,6 +55,14 @@ export const PoolRow = ({
       actions={
         canMutate ? (
           <>
+            {showZoneCount && (
+              <span
+                className="flex size-4 items-center justify-center rounded-full bg-neutral-700 text-[9px] font-medium text-neutral-300"
+                title={`In ${zoneCount} zone${zoneCount === 1 ? "" : "s"}`}
+              >
+                {zoneCount}
+              </span>
+            )}
             <Button
               type="button"
               size="sm"

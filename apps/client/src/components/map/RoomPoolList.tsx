@@ -49,6 +49,7 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
   const audioSources = useGlobalStore((s) => s.audioSources);
   const isConnected = useGlobalStore((s) => s.socket?.readyState === WebSocket.OPEN);
   const broadcastReorder = useGlobalStore((s) => s.broadcastReorder);
+  const playlists = useGlobalStore((s) => s.playlists);
   const shapes = useMapStore((s) => s.shapes);
   const selectedShapeId = useMapStore((s) => s.selectedShapeId);
   const zonePlaylist = useGlobalStore((s) => (selectedShapeId ? s.playlists.get(selectedShapeId) : undefined));
@@ -63,6 +64,15 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
   const zoneLabel = shape ? zoneDisplayName(shape) : null;
   const zoneUrls = new Set((zonePlaylist?.tracks ?? []).map((t) => t.url));
   const tracks = pool?.tracks ?? [];
+
+  // How many zones (shape contexts, not the pool itself) each track is in —
+  // powers the count badge so it's obvious which pool tracks are assigned to
+  // zones vs. orphaned (0 → safe to delete).
+  const zoneCountByUrl = new Map<string, number>();
+  playlists.forEach((pl, id) => {
+    if (id === MAIN_CONTEXT_ID) return;
+    for (const t of pl.tracks) zoneCountByUrl.set(t.url, (zoneCountByUrl.get(t.url) ?? 0) + 1);
+  });
 
   // Project pool tracks into AudioSourceState (loading/error state, when known,
   // comes from the global registry) so they render through the shared row.
@@ -99,15 +109,16 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
     setDeleteUrl(null);
   };
 
-  const notYetInZone = tracks.filter((t) => !zoneUrls.has(t.url));
-  const handleAddAll = () => {
-    if (!shape || notYetInZone.length === 0) return;
+  // Only tracks in no zone at all — the ones that still need assigning.
+  const unassigned = tracks.filter((t) => (zoneCountByUrl.get(t.url) ?? 0) === 0);
+  const handleAddUnassigned = () => {
+    if (!shape || unassigned.length === 0) return;
     send({
       type: ClientActionEnum.enum.IMPORT_TRACKS_TO_CONTEXT,
       contextId: shape.id,
-      urls: notYetInZone.map((t) => t.url),
+      urls: unassigned.map((t) => t.url),
     });
-    toast.success(`Adding ${notYetInZone.length} track${notYetInZone.length === 1 ? "" : "s"} to ${zoneLabel}…`);
+    toast.success(`Adding ${unassigned.length} unassigned track${unassigned.length === 1 ? "" : "s"} to ${zoneLabel}…`);
   };
 
   const sensors = useSensors(
@@ -143,6 +154,7 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
       canMutate={canMutate}
       isConnected={isConnected}
       inZone={zoneUrls.has(sourceState.source.url)}
+      zoneCount={zoneCountByUrl.get(sourceState.source.url) ?? 0}
       zoneLabel={zoneLabel}
       hasShape={Boolean(shape)}
       onAddToZone={handleAdd}
@@ -179,12 +191,12 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
           size="sm"
           variant="ghost"
           className="mt-2 h-7 justify-center gap-1.5 text-xs text-neutral-400 hover:text-white"
-          disabled={!isConnected || notYetInZone.length === 0}
-          title={notYetInZone.length === 0 ? `Every pool track is already in ${zoneLabel}` : undefined}
-          onClick={handleAddAll}
+          disabled={!isConnected || unassigned.length === 0}
+          title={unassigned.length === 0 ? "No unassigned tracks in the pool" : undefined}
+          onClick={handleAddUnassigned}
         >
           <ListPlus className="size-3.5" />
-          Add all to {zoneLabel}
+          Add unassigned to {zoneLabel}
         </Button>
       )}
 
