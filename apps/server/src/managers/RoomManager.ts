@@ -496,6 +496,10 @@ export class RoomManager {
     const filter = contextIds && contextIds.length > 0 ? new Set(contextIds) : undefined;
     const actions: PlayActionType[] = [];
     for (const playlist of this.playlists.values()) {
+      // In a map room the main context is the Room Pool — a superset library of
+      // every track (see the pool-invariant in addTrackToContext), not a
+      // playable zone — so never batch-play it. Audio rooms have only main.
+      if (this.isMapRoom() && playlist.id === MAIN_CONTEXT_ID) continue;
       if (filter && !filter.has(playlist.id)) continue;
       if (playlist.tracks.length === 0) continue;
       const candidate = playlist.playback.audioSource || playlist.tracks[0].url;
@@ -522,6 +526,8 @@ export class RoomManager {
     const filter = contextIds && contextIds.length > 0 ? new Set(contextIds) : undefined;
     const actions: PauseActionType[] = [];
     for (const playlist of this.playlists.values()) {
+      // See buildPlayAllActions: the map room's main context is the pool, not a zone.
+      if (this.isMapRoom() && playlist.id === MAIN_CONTEXT_ID) continue;
       if (filter && !filter.has(playlist.id)) continue;
       if (playlist.playback.type !== "playing") continue;
       actions.push({
@@ -557,8 +563,7 @@ export class RoomManager {
     }
 
     // Pre-validate each play action against its playlist; skip the ones that can't be played.
-    const validActions: { playlist: PlaylistRuntime; playAction: PlayActionType; audioSource: AudioSourceType }[] =
-      [];
+    const validActions: { playlist: PlaylistRuntime; playAction: PlayActionType; audioSource: AudioSourceType }[] = [];
     for (const pa of playActions) {
       const ctxId = pa.contextId ?? MAIN_CONTEXT_ID;
       const playlist = this.resolvePlaylist(ctxId, "initiateBatchedPlay");

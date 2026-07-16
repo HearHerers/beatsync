@@ -27,8 +27,9 @@ export const EnsembleControls = () => {
   const broadcastPlayAll = useGlobalStore((s) => s.broadcastPlayAll);
   const broadcastPauseAll = useGlobalStore((s) => s.broadcastPauseAll);
 
-  // Derive counts + the contextId list for each operation. Main is the back-
-  // compat audio-room playlist and is empty in map rooms anyway.
+  // Derive counts + the contextId list for each operation. Skip the main
+  // context — in a map room it's the Room Pool (a superset library), not a
+  // playable zone.
   const { playingCount, totalWithTracks, playContextIds, pauseContextIds } = useMemo(() => {
     let playing = 0;
     let withTracks = 0;
