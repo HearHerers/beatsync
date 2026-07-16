@@ -1,7 +1,7 @@
 import { AudioSourceState, useGlobalStore } from "@/store/global";
 import { sendWSRequest } from "@/utils/ws";
 import { ClientActionEnum, MAIN_CONTEXT_ID } from "@beatsync/shared";
-import { Trash2 } from "lucide-react";
+import { MinusIcon, Trash2 } from "lucide-react";
 import { PlaylistRow } from "./PlaylistRow";
 
 /**
@@ -106,7 +106,7 @@ export const QueueSortableItem = ({
               });
             }}
           >
-            <Trash2 className="size-3.5" />
+            {isMain ? <Trash2 className="size-3.5" /> : <MinusIcon className="size-4" />}
           </button>
         ) : undefined
       }
