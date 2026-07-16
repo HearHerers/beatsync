@@ -1,7 +1,7 @@
 import { AudioSourceState, useGlobalStore } from "@/store/global";
 import { sendWSRequest } from "@/utils/ws";
 import { ClientActionEnum, MAIN_CONTEXT_ID } from "@beatsync/shared";
-import { MinusIcon } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { PlaylistRow } from "./PlaylistRow";
 
 /**
@@ -93,6 +93,7 @@ export const QueueSortableItem = ({
         canMutate ? (
           <button
             className="p-1 rounded-full text-neutral-500 hover:text-red-400 transition-colors hover:scale-110 duration-150 focus:outline-none focus:text-red-400 focus:scale-110"
+            title={isMain ? "Delete from the room" : "Remove from this zone"}
             onClick={(e) => {
               e.stopPropagation();
               const socket = useGlobalStore.getState().socket;
@@ -105,7 +106,7 @@ export const QueueSortableItem = ({
               });
             }}
           >
-            <MinusIcon className="size-4" />
+            <Trash2 className="size-3.5" />
           </button>
         ) : undefined
       }
