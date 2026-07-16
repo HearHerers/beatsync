@@ -33,6 +33,11 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
   }, []);
   const isMobile = useIsMobile();
   const blurTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Cap the results dropdown to the space below the input so its bottom never
+  // runs off-screen / under the bottom bar (a fixed vh max can, when the search
+  // box sits low in the column).
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [dropdownMaxH, setDropdownMaxH] = React.useState<number>();
   const canMutate = useCanMutate();
   const socket = useGlobalStore((state) => state.socket);
   const setIsSearching = useGlobalStore((state) => state.setIsSearching);
@@ -94,6 +99,21 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [setFocus, isFocused, canMutate, showResults]);
+
+  // Cap the results dropdown to the space below the input (minus the bottom
+  // bar), recomputed when it opens and on resize, so it never runs off-screen.
+  React.useEffect(() => {
+    if (!showResults) return;
+    const compute = () => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const BOTTOM_GAP = 80; // clears the map bottom bar + a margin
+      setDropdownMaxH(Math.max(160, window.innerHeight - rect.bottom - BOTTOM_GAP));
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, [showResults]);
 
   const runSearch = React.useCallback(
     (raw: string) => {
@@ -172,6 +192,7 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
 
   return (
     <div
+      ref={containerRef}
       className="relative w-full"
       onBlur={handleBlur}
       onFocus={() => {
@@ -332,8 +353,10 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
             <div
               className={cn(
                 "overflow-y-auto scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-neutral-600/30 scrollbar-track-transparent hover:scrollbar-thumb-neutral-600/50 bg-neutral-900",
+                // vh cap is a fallback until the measured cap (below) kicks in
                 isMobile ? "max-h-[70vh]" : "max-h-[60vh]"
               )}
+              style={{ maxHeight: dropdownMaxH }}
             >
               {isSearching || searchResults ? (
                 <SearchResults className="p-2" onTrackSelect={handleTrackSelection} contextId={contextId} />
