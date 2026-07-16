@@ -8,6 +8,7 @@ import { BeatPill, DemoBeatFlash } from "./BeatFlash";
 import { Bottom } from "./Bottom";
 import { RoomQRCode } from "./CopyRoom";
 import { GlobalVolumeControl } from "./GlobalVolumeControl";
+import { InlineSearch } from "./InlineSearch";
 import { LowPassControl } from "./LowPassControl";
 import { DemoLyrics } from "./DemoLyrics";
 import { MetronomeButton } from "./Metronome";
@@ -143,6 +144,7 @@ export const DemoDashboard = ({ roomId }: DemoDashboardProps) => {
 
           {isAdmin && (
             <div className="shrink-0 px-6 pb-4 flex flex-col gap-3">
+              <InlineSearch />
               <DemoTrackSelector />
               <div className="flex flex-col lg:flex-row gap-3 [&_[data-slot=slider-track]]:before:inset-y-[-16px] [&_[data-slot=slider-track]]:h-2 [&_[data-slot=slider-thumb]]:size-5 [&_[data-slot=slider-thumb]]:opacity-100">
                 <LowPassControl className="flex-1" isMobile />

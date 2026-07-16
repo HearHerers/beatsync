@@ -13,8 +13,8 @@
 //   - Ensemble play/pause — EnsembleControls in the bottom bar
 //   - Chat / user list — those still live in Right / Left
 
-import { AudioUploaderMinimal } from "@/components/AudioUploaderMinimal";
 import { Queue } from "@/components/Queue";
+import { AddTracks } from "./AddTracks";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -216,7 +216,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
         )}
         {canMutate && (
           <div className="px-3 pt-3">
-            <AudioUploaderMinimal label="Upload to Room Pool" destination="Room Pool" />
+            <AddTracks label="Upload to Room Pool" destination="Room Pool" />
           </div>
         )}
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-3 scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-muted-foreground/10 scrollbar-track-transparent hover:scrollbar-thumb-muted-foreground/20">
@@ -365,10 +365,11 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
           </div>
         </div>
 
-        {/* Uploader pinned above the queue */}
+        {/* Provider search + uploader pinned above the queue. Search streams the
+            chosen track straight into this zone's playlist (contextId). */}
         {canMutate && (
           <div className="px-3 pt-3">
-            <AudioUploaderMinimal contextId={shape.id} label={`Upload to ${zoneDisplayName(shape)}`} />
+            <AddTracks contextId={shape.id} label={`Upload to ${zoneDisplayName(shape)}`} />
           </div>
         )}
 

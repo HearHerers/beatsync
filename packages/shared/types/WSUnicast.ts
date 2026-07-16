@@ -16,6 +16,9 @@ export type NTPResponseMessageType = z.infer<typeof NTPResponseMessageSchema>;
 
 export const MusicSearchResponseSchema = z.object({
   type: z.literal("SEARCH_RESPONSE"),
+  // Echoes the request's query so the client can drop stale/out-of-order
+  // responses during search-as-you-type (fast typing fires overlapping requests).
+  query: z.string(),
   response: SearchResponseSchema,
 });
 export type MusicSearchResponseType = z.infer<typeof MusicSearchResponseSchema>;

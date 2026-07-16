@@ -14,15 +14,18 @@ import { toast } from "sonner";
 interface SearchResultsProps {
   className?: string;
   onTrackSelect?: () => void;
+  /** When set, streamed tracks are added to this playlist context (e.g. a
+   * shape.id in map rooms) rather than the room-wide "main" playlist. */
+  contextId?: string;
 }
 
-export function SearchResults({ className, onTrackSelect }: SearchResultsProps) {
+export function SearchResults({ className, onTrackSelect, contextId }: SearchResultsProps) {
   const isMobile = useIsMobile();
   const searchResults = useGlobalStore((state) => state.searchResults);
   const isSearching = useGlobalStore((state) => state.isSearching);
 
   // Track which tracks are currently being streamed to prevent duplicates
-  const streamingTracksRef = useRef<Set<number>>(new Set());
+  const streamingTracksRef = useRef<Set<string>>(new Set());
   const isLoadingMoreResults = useGlobalStore((state) => state.isLoadingMoreResults);
   const hasMoreResults = useGlobalStore((state) => state.hasMoreResults);
   const searchQuery = useGlobalStore((state) => state.searchQuery);
@@ -88,6 +91,7 @@ export function SearchResults({ className, onTrackSelect }: SearchResultsProps) 
           type: ClientActionEnum.enum.STREAM_MUSIC,
           trackId: track.id,
           trackName: formattedTrackName,
+          contextId,
         },
       });
 
@@ -283,15 +287,6 @@ export function SearchResults({ className, onTrackSelect }: SearchResultsProps) 
         >
           Start typing to search for music...
         </motion.h3>
-
-        <motion.p
-          className="text-neutral-400 text-center text-xs"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.3, delay: 0.15 }}
-        >
-          Experimental. Free while in beta.
-        </motion.p>
       </motion.div>
     );
   }
@@ -325,20 +320,27 @@ export function SearchResults({ className, onTrackSelect }: SearchResultsProps) 
               className="group hover:bg-neutral-800 px-3 py-2 transition-all duration-200 cursor-pointer flex items-center gap-3 rounded-md"
               onClick={() => handleAddTrack(track)}
             >
-              {/* Album Art */}
+              {/* Album Art. Providers without cover art (e.g. Navidrome) return
+                  empty image URLs — an empty <img src> doesn't reliably fire
+                  onError, so render the ♪ placeholder directly when there's no
+                  URL and only use <img> (with onError fallback) when there is. */}
               <div className="relative flex-shrink-0">
-                {/* eslint-disable-next-line @next/next/no-img-element -- external album art URLs with onError fallback, not compatible with next/image */}
-                <img
-                  src={track.album.image.thumbnail || track.album.image.small}
-                  alt={track.album.title}
-                  // width={40}
-                  // height={40}
-                  className="w-10 h-10 rounded object-cover bg-neutral-800"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src =
-                      "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23404040'/%3E%3Ctext x='50' y='50' text-anchor='middle' dy='.3em' fill='%23888' font-size='14'%3E♪%3C/text%3E%3C/svg%3E";
-                  }}
-                />
+                {track.album.image.thumbnail || track.album.image.small ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- external album art URLs with onError fallback, not compatible with next/image
+                  <img
+                    src={track.album.image.thumbnail || track.album.image.small}
+                    alt={track.album.title}
+                    className="w-10 h-10 rounded object-cover bg-neutral-800"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src =
+                        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23404040'/%3E%3Ctext x='50' y='50' text-anchor='middle' dy='.3em' fill='%23888' font-size='14'%3E♪%3C/text%3E%3C/svg%3E";
+                    }}
+                  />
+                ) : (
+                  <div className="flex w-10 h-10 items-center justify-center rounded bg-neutral-800 text-neutral-500 text-base">
+                    ♪
+                  </div>
+                )}
               </div>
 
               {/* Track Info */}

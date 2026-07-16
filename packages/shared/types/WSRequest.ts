@@ -158,8 +158,13 @@ export const SearchMusicSchema = z.object({
 
 export const StreamMusicSchema = z.object({
   type: z.literal(ClientActionEnum.enum.STREAM_MUSIC),
-  trackId: z.number(),
+  // String to support Navidrome/Subsonic opaque IDs (numeric provider IDs are
+  // sent as strings too). See TrackSchema.id in provider.ts.
+  trackId: z.string(),
   trackName: z.string().optional(),
+  /** Route the streamed track into this playlist context (e.g. a shape.id in
+   * map rooms). Omitted = the room-wide "main" playlist (audio rooms). */
+  contextId: z.string().optional(),
 });
 
 export const SetGlobalVolumeSchema = z.object({
