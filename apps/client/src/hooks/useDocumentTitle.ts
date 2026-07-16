@@ -13,7 +13,7 @@ export const useDocumentTitle = () => {
       const songName = extractFileNameFromUrl(track.source.url);
       document.title = `${songName}`;
     } else {
-      document.title = "Beatsync";
+      document.title = "HearHere";
     }
   }, [isPlaying, selectedAudioUrl, getSelectedTrack]);
 };
