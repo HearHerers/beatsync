@@ -704,10 +704,18 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     });
     const selfLabel = me?.username || "You";
     if (ownMarkerRef.current) {
-      if (!isDraggingOwnRef.current) ownMarkerRef.current.setLatLng(pos);
-      ownMarkerRef.current.setIcon(selfIcon);
-      ownMarkerRef.current.unbindTooltip();
-      ownMarkerRef.current.bindTooltip(selfLabel, { direction: "top" });
+      // During a drag, Leaflet owns the marker's DOM element + position. This
+      // effect still re-runs every drag frame (ownPosition updates via the
+      // "drag" handler below), but rebuilding the avatar icon and calling
+      // setIcon recreates that element — incl. the <img> flag — which janks and
+      // fights the drag handler's pointer tracking. Skip all marker mutation
+      // until the drag ends; a later ownPosition/clients change re-syncs it.
+      if (!isDraggingOwnRef.current) {
+        ownMarkerRef.current.setLatLng(pos);
+        ownMarkerRef.current.setIcon(selfIcon);
+        ownMarkerRef.current.unbindTooltip();
+        ownMarkerRef.current.bindTooltip(selfLabel, { direction: "top" });
+      }
     } else {
       const marker = L.marker(pos, { draggable: true, icon: selfIcon });
       marker.bindTooltip(selfLabel, { direction: "top" });
