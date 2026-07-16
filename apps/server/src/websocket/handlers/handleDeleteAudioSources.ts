@@ -1,9 +1,28 @@
 import { IS_DEMO_MODE } from "@/demo";
-import { deleteObject, extractKeyFromUrl } from "@/lib/r2";
+import { deleteObject, keyFromPublicUrl } from "@/lib/r2";
+import type { RoomManager } from "@/managers/RoomManager";
 import { sendBroadcast } from "@/utils/responses";
 import { requireCanMutate } from "@/websocket/middlewares";
 import type { HandlerFunction } from "@/websocket/types";
+import type { BunServer } from "@/utils/websocket";
 import type { ExtractWSRequestFrom } from "@beatsync/shared";
+
+/**
+ * Deleting the playing track resets the room's playback state to paused, but
+ * that alone doesn't stop audio already running on clients — schedule an
+ * explicit pause for everyone.
+ */
+const broadcastPauseForRemovedCurrent = (server: BunServer, roomId: string, room: RoomManager) => {
+  sendBroadcast({
+    server,
+    roomId,
+    message: {
+      type: "SCHEDULED_ACTION",
+      scheduledAction: { type: "PAUSE", audioSource: "", trackTimeSeconds: 0 },
+      serverTimeToExecute: room.getScheduledExecutionTime(),
+    },
+  });
+};
 
 export const handleDeleteAudioSources: HandlerFunction<ExtractWSRequestFrom["DELETE_AUDIO_SOURCES"]> = async ({
   ws,
@@ -24,7 +43,10 @@ export const handleDeleteAudioSources: HandlerFunction<ExtractWSRequestFrom["DEL
 
   // In demo mode, skip R2 deletion — just remove from room state
   if (IS_DEMO_MODE) {
-    const { updated } = room.removeAudioSources(urlsToDelete);
+    const { updated, removedCurrent } = room.removeAudioSources(urlsToDelete);
+    if (removedCurrent) {
+      broadcastPauseForRemovedCurrent(server, ws.data.roomId, room);
+    }
     sendBroadcast({
       server,
       roomId: ws.data.roomId,
@@ -57,9 +79,12 @@ export const handleDeleteAudioSources: HandlerFunction<ExtractWSRequestFrom["DEL
       return;
     }
 
-    // Otherwise we need to actually delete the file from R2
+    // Otherwise we need to actually delete the file from R2. Key derivation
+    // must be bucket-aware (keyFromPublicUrl, not the raw URL pathname):
+    // path-style PUBLIC_URLs fold the bucket into the path, and DeleteObject
+    // on a wrong key "succeeds" silently, orphaning the object.
     try {
-      const key = extractKeyFromUrl(url);
+      const key = keyFromPublicUrl(url);
 
       if (!key) {
         throw new Error(`Failed to extract key from URL: ${url}`);
@@ -86,7 +111,11 @@ export const handleDeleteAudioSources: HandlerFunction<ExtractWSRequestFrom["DEL
   }
 
   // Remove only the successfully deleted sources from room state
-  const { updated } = room.removeAudioSources(urlsToRemove);
+  const { updated, removedCurrent } = room.removeAudioSources(urlsToRemove);
+
+  if (removedCurrent) {
+    broadcastPauseForRemovedCurrent(server, ws.data.roomId, room);
+  }
 
   // Broadcast updated queue to all clients
   sendBroadcast({

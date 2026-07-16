@@ -12,7 +12,7 @@ import { arrayMove, SortableContext, verticalListSortingStrategy } from "@dnd-ki
 import { cn } from "@/lib/utils";
 import { AudioSourceState, useCanMutate, useGlobalStore } from "@/store/global";
 import { MAIN_CONTEXT_ID } from "@beatsync/shared";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import React from "react";
 import LoadDefaultTracksButton from "./LoadDefaultTracksButton";
 import { QueueSortableItem } from "./QueueSortableItem";
@@ -41,10 +41,14 @@ export const Queue = ({ className, contextId = MAIN_CONTEXT_ID, ...rest }: Queue
     return playlist.tracks.map((t) => byUrl.get(t.url) ?? { source: t, status: "idle" });
   }, [isMain, audioSources, playlist]);
 
-  const canReorder = isMain && canMutate;
+  // Reordering works in any context (audio-room "main" and map-room shapes
+  // alike) for anyone allowed to mutate the room.
+  const canReorder = canMutate;
 
   const sensors = useSensors(
-    useSensor(MouseSensor),
+    // Small distance threshold so grabbing the drag handle doesn't fire the
+    // row's click-to-play before a drag is recognized.
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, {
       activationConstraint: {
         delay: 250,
@@ -61,8 +65,8 @@ export const Queue = ({ className, contextId = MAIN_CONTEXT_ID, ...rest }: Queue
       const oldIndex = items.findIndex((src) => src.source.url === active.id);
       const newIndex = items.findIndex((src) => src.source.url === over.id);
       const newItems = arrayMove(items, oldIndex, newIndex);
-      const modified = newItems.map((it) => ({ url: it.source.url }));
-      broadcastReorder(modified);
+      const orderedUrls = newItems.map((it) => it.source.url);
+      broadcastReorder(contextId, orderedUrls);
     }
   }
 
@@ -78,33 +82,29 @@ export const Queue = ({ className, contextId = MAIN_CONTEXT_ID, ...rest }: Queue
               modifiers={[restrictToVerticalAxis, restrictToWindowEdges]}
             >
               <SortableContext items={items.map((src) => src.source.url)} strategy={verticalListSortingStrategy}>
-                <AnimatePresence initial={true}>
-                  {items.map((sourceState, index) => (
-                    <QueueSortableItem
-                      key={sourceState.source.url}
-                      id={sourceState.source.url}
-                      sourceState={sourceState}
-                      index={index}
-                      canMutate={canMutate}
-                      contextId={contextId}
-                    />
-                  ))}
-                </AnimatePresence>
+                {items.map((sourceState, index) => (
+                  <QueueSortableItem
+                    key={sourceState.source.url}
+                    id={sourceState.source.url}
+                    sourceState={sourceState}
+                    index={index}
+                    canMutate={canMutate}
+                    contextId={contextId}
+                  />
+                ))}
               </SortableContext>
             </DndContext>
           ) : (
-            <AnimatePresence initial={true}>
-              {items.map((sourceState, index) => (
-                <QueueSortableItem
-                  key={sourceState.source.url}
-                  id={sourceState.source.url}
-                  sourceState={sourceState}
-                  index={index}
-                  canMutate={canMutate}
-                  contextId={contextId}
-                />
-              ))}
-            </AnimatePresence>
+            items.map((sourceState, index) => (
+              <QueueSortableItem
+                key={sourceState.source.url}
+                id={sourceState.source.url}
+                sourceState={sourceState}
+                index={index}
+                canMutate={canMutate}
+                contextId={contextId}
+              />
+            ))
           )
         ) : (
           <motion.div

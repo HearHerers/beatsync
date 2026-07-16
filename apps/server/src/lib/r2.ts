@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -118,9 +119,20 @@ export function extractKeyFromUrl(url: string): string | null {
  * @returns true if the file exists, false otherwise
  */
 export async function validateAudioFileExists(audioUrl: string): Promise<boolean> {
+  // Tracks whose URL is not in our bucket (music-provider streams, e.g.
+  // Navidrome) have nothing to HEAD in R2 — treat them as valid rather than
+  // dropping them on restore. The client handles a dead provider gracefully.
+  if (!isOwnBucketUrl(audioUrl)) {
+    return true;
+  }
+
   try {
-    // Extract the key from the public URL
-    const key = extractKeyFromUrl(audioUrl);
+    // Derive the object key relative to PUBLIC_URL. Must be bucket-aware:
+    // path-style PUBLIC_URLs (https://host/bucket) fold the bucket into the
+    // URL path, and using the raw pathname as the key (the old
+    // extractKeyFromUrl behavior) 404s every HEAD — which made restore drop
+    // every uploaded track on server restart.
+    const key = keyFromPublicUrl(audioUrl);
 
     if (!key) {
       console.error(`Could not extract key from URL: ${audioUrl}`);
@@ -174,6 +186,86 @@ export function generateAudioFileName(originalName: string): string {
   const dateStr = now.toISOString().replace(":", "-");
 
   return `${safeName}${R2_AUDIO_FILE_NAME_DELIMITER}${dateStr}.${extension}`;
+}
+
+/**
+ * The R2 object key for one of our public URLs, or null if the URL doesn't
+ * belong to us. Derived RELATIVE TO `PUBLIC_URL` (every object's URL is
+ * `${PUBLIC_URL}/${key}` — see getPublicAudioUrl), so this is correct for both
+ * virtual-hosted PUBLIC_URLs (`https://cdn.example.com`) and path-style ones
+ * that include the bucket (`https://host/bucket`). Do NOT use the raw URL
+ * pathname here — that would fold the bucket segment into the key on path-style
+ * deployments and break every S3 operation on the result.
+ */
+export function keyFromPublicUrl(url: string): string | null {
+  if (!S3_CONFIG.PUBLIC_URL) return null;
+  const base = S3_CONFIG.PUBLIC_URL.replace(/\/+$/, "") + "/";
+  if (!url.startsWith(base)) return null;
+  // Decode each path segment (roomId + filename) the way extractKeyFromUrl does.
+  return url
+    .slice(base.length)
+    .split("/")
+    .map((part) => decodeURIComponent(part))
+    .join("/");
+}
+
+/**
+ * Whether a public URL points at our own R2 bucket (its object key resolves
+ * relative to PUBLIC_URL). Only same-bucket objects can be server-side copied;
+ * foreign-host URLs (e.g. a playlist exported from another deployment) cannot.
+ */
+export function isOwnBucketUrl(url: string): boolean {
+  return keyFromPublicUrl(url) !== null;
+}
+
+/**
+ * Parse the `room-{id}/` prefix out of a public URL, returning the room id, or
+ * null if the URL isn't one of ours / isn't room-scoped.
+ */
+export function roomIdFromUrl(url: string): string | null {
+  const key = keyFromPublicUrl(url);
+  const match = key ? /^room-([^/]+)\//.exec(key) : null;
+  return match ? match[1] : null;
+}
+
+/**
+ * Server-side copy an audio object that already lives in our bucket into a
+ * destination room's prefix, minting a fresh unique filename that preserves the
+ * human-readable display name (the part before the `___` delimiter). Returns the
+ * new public URL, or null if the URL isn't ours or the copy fails (e.g. the
+ * source object was deleted). Never fetches the URL — pure S3 CopyObject.
+ */
+export async function copyObjectIntoRoom(sourceUrl: string, destRoomId: string): Promise<string | null> {
+  const sourceKey = keyFromPublicUrl(sourceUrl);
+  if (!sourceKey) return null;
+
+  // Reconstruct an "originalName.ext" to feed generateAudioFileName so the new
+  // object keeps the same display name with a fresh, unique timestamp.
+  const baseName = sourceKey.split("/").pop() ?? "audio.mp3";
+  const extension = baseName.includes(".") ? baseName.split(".").pop()! : "mp3";
+  const delimiterIndex = baseName.indexOf(R2_AUDIO_FILE_NAME_DELIMITER);
+  const displayName = delimiterIndex !== -1 ? baseName.substring(0, delimiterIndex) : baseName.replace(/\.[^/.]+$/, "");
+  const destFileName = generateAudioFileName(`${displayName}.${extension}`);
+  const destKey = createKey(destRoomId, destFileName);
+
+  // CopySource must be URL-encoded per segment (bucket + each key part).
+  const encodedSource = [S3_CONFIG.BUCKET_NAME, ...sourceKey.split("/")].map(encodeURIComponent).join("/");
+
+  try {
+    await r2Client.send(
+      new CopyObjectCommand({
+        Bucket: S3_CONFIG.BUCKET_NAME,
+        Key: destKey,
+        CopySource: encodedSource,
+        Metadata: { roomId: destRoomId, uploadedAt: new Date().toISOString() },
+        MetadataDirective: "REPLACE",
+      })
+    );
+    return getPublicAudioUrl(destRoomId, destFileName);
+  } catch (error) {
+    console.error(`copyObjectIntoRoom failed for ${sourceUrl} -> room-${destRoomId}:`, error);
+    return null;
+  }
 }
 
 /**

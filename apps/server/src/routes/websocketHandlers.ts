@@ -46,12 +46,14 @@ export const handleOpen = (ws: ServerWebSocket<WSData>, server: BunServer) => {
   const { roomId, requestedRoomType } = ws.data;
   ws.subscribe(roomId);
 
+  // Room-creation wins: only a brand-new room takes its type from the connecting
+  // client. Rooms are persistent — an idle room (zero connections) still holds its
+  // state and type, so joining an existing map room via a /room/ URL must not flip
+  // it to audio. Clients adapt to the actual type via ROOM_TYPE_INFO below.
+  const isNewRoom = !globalManager.hasRoom(roomId);
   const room = globalManager.getOrCreateRoom(roomId);
 
-  // First-connection wins: if this is the first client AND they asked for a
-  // specific room type, lock the room to that type. Subsequent clients see
-  // whatever the first one chose via ROOM_TYPE_INFO below.
-  if (requestedRoomType && room.getClients().length === 0) {
+  if (requestedRoomType && isNewRoom) {
     try {
       room.setRoomType(requestedRoomType);
     } catch (err) {
@@ -70,6 +72,7 @@ export const handleOpen = (ws: ServerWebSocket<WSData>, server: BunServer) => {
         type: "ROOM_TYPE_INFO",
         roomType: room.getRoomType(),
         ...(room.getMapMetadata() && { mapMetadata: room.getMapMetadata() }),
+        ...(room.getRoomName() && { roomName: room.getRoomName() }),
         ...(room.getDefaultTileLayerId() && { defaultTileLayerId: room.getDefaultTileLayerId() }),
       },
     },

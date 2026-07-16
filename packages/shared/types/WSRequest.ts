@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CHAT_CONSTANTS, LOW_PASS_CONSTANTS, MAP_CONSTANTS } from "../constants";
 import { AudioSourceSchema, MapMetadataSchema, MapTileLayerIdEnum, PositionSchema } from "./basic";
+import { PLAYLIST_EXPORT_MAX_TRACKS } from "./playlist";
 import { ShapeSchema } from "./shape";
 
 // ROOM EVENTS
@@ -33,12 +34,13 @@ export const ClientActionEnum = z.enum([
   "SET_GLOBAL_VOLUME", // Set global volume for all clients
   "SEND_CHAT_MESSAGE", // Send a chat message,
   "AUDIO_SOURCE_LOADED", // Audio source loaded in response to a LOAD_AUDIO_SOURCE request
-  "REORDER_AUDIO_SOURCES", // Reorder audio sources in the room queue
   "SET_METRONOME", // Toggle metronome on/off for all clients
   "SET_LOW_PASS_FREQ", // Set low-pass filter cutoff frequency
   "SET_CONTEXT_LOOP", // Set the loop flag for a playlist context
   "ADD_TRACK_TO_CONTEXT", // Append a track to a specific playlist context
   "REMOVE_TRACK_FROM_CONTEXT", // Remove a track from a specific playlist context
+  "REORDER_TRACK_IN_CONTEXT", // Reorder the tracks within a specific playlist context
+  "IMPORT_TRACKS_TO_CONTEXT", // Bulk-add tracks (from an imported playlist file) to a context
   // Map-room geometry actions. Audio behavior of a shape's playlist (tracks,
   // play/pause, loop) flows through the unified per-context actions with
   // contextId = shape.id — there are no shape-specific audio actions.
@@ -47,8 +49,10 @@ export const ClientActionEnum = z.enum([
   "DELETE_SHAPE",
   "CLEAR_SHAPES",
   "SET_SHAPE_FALLOFF",
+  "SET_SHAPE_NAME",
   "SET_SHAPE_GROUP",
   "SET_MAP_METADATA",
+  "SET_ROOM_NAME",
   "SET_USERNAME",
   "SET_DEFAULT_TILE_LAYER", // Admin sets the room-wide default base map
   "SET_GEO_POSITION", // Client GPS update
@@ -173,11 +177,6 @@ export const AudioSourceLoadedSchema = z.object({
   contextId: z.string().optional(),
 });
 
-export const ReorderAudioSourcesSchema = z.object({
-  type: z.literal(ClientActionEnum.enum.REORDER_AUDIO_SOURCES),
-  reorderedAudioSources: z.array(AudioSourceSchema).min(1),
-});
-
 export const SetMetronomeSchema = z.object({
   type: z.literal(ClientActionEnum.enum.SET_METRONOME),
   enabled: z.boolean(),
@@ -218,6 +217,33 @@ export const RemoveTrackFromContextSchema = z.object({
 });
 export type RemoveTrackFromContextType = z.infer<typeof RemoveTrackFromContextSchema>;
 
+/**
+ * Reorder the tracks within a specific context's playlist. `orderedUrls` is the
+ * full new ordering by track URL — the server already holds the source objects,
+ * so only the order needs to travel. Works for any context (audio-room "main"
+ * and map-room shape playlists alike). Omitted contextId = "main".
+ */
+export const ReorderTrackInContextSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.REORDER_TRACK_IN_CONTEXT),
+  orderedUrls: z.array(z.string()).min(1),
+  contextId: z.string().optional(),
+});
+export type ReorderTrackInContextType = z.infer<typeof ReorderTrackInContextSchema>;
+
+/**
+ * Bulk-add tracks to a context from an imported playlist file. Carries only the
+ * track URLs — display names derive from the URL, and the source playlist's loop
+ * flag is intentionally not applied (the destination keeps its setting). The
+ * server classifies each URL (same-room reference vs. same-bucket re-host vs.
+ * foreign-host reference) when adding. Omitted contextId = "main".
+ */
+export const ImportTracksToContextSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.IMPORT_TRACKS_TO_CONTEXT),
+  urls: z.array(z.string().url()).min(1).max(PLAYLIST_EXPORT_MAX_TRACKS),
+  contextId: z.string().optional(),
+});
+export type ImportTracksToContextType = z.infer<typeof ImportTracksToContextSchema>;
+
 // ── Map-room geometry ──────────────────────────────────────────────
 // Audio behavior (tracks, play/pause, loop) flows through the unified per-
 // context actions with contextId = shape.id. The shape actions below only
@@ -254,6 +280,14 @@ export const SetShapeFalloffSchema = z.object({
 });
 export type SetShapeFalloffType = z.infer<typeof SetShapeFalloffSchema>;
 
+export const SetShapeNameSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.SET_SHAPE_NAME),
+  shapeId: z.string(),
+  /** Empty string clears the name (UI falls back to "Zone <id>"). */
+  name: z.string().max(80),
+});
+export type SetShapeNameType = z.infer<typeof SetShapeNameSchema>;
+
 export const SetShapeGroupSchema = z.object({
   type: z.literal(ClientActionEnum.enum.SET_SHAPE_GROUP),
   shapeId: z.string(),
@@ -267,6 +301,12 @@ export const SetMapMetadataSchema = z.object({
 });
 export type SetMapMetadataType = z.infer<typeof SetMapMetadataSchema>;
 
+export const SetRoomNameSchema = z.object({
+  type: z.literal(ClientActionEnum.enum.SET_ROOM_NAME),
+  /** Empty string clears the name (UI falls back to "Room <id>"). */
+  roomName: z.string().max(80),
+});
+export type SetRoomNameType = z.infer<typeof SetRoomNameSchema>;
 export const SetUsernameSchema = z.object({
   type: z.literal(ClientActionEnum.enum.SET_USERNAME),
   /** Display name for this client. Trimmed + length-capped server-side. */
@@ -313,20 +353,23 @@ export const WSRequestSchema = z.discriminatedUnion("type", [
   SetGlobalVolumeSchema,
   SendChatMessageSchema,
   AudioSourceLoadedSchema,
-  ReorderAudioSourcesSchema,
   SetMetronomeSchema,
   SetLowPassFreqSchema,
   SetContextLoopSchema,
   AddTrackToContextSchema,
   RemoveTrackFromContextSchema,
+  ReorderTrackInContextSchema,
+  ImportTracksToContextSchema,
   // Map-room geometry
   AddShapeSchema,
   UpdateShapeSchema,
   DeleteShapeSchema,
   ClearShapesSchema,
   SetShapeFalloffSchema,
+  SetShapeNameSchema,
   SetShapeGroupSchema,
   SetMapMetadataSchema,
+  SetRoomNameSchema,
   SetUsernameSchema,
   SetDefaultTileLayerSchema,
   SetGeoPositionSchema,
@@ -337,7 +380,6 @@ export type PlayActionType = z.infer<typeof PlayActionSchema>;
 export type PauseActionType = z.infer<typeof PauseActionSchema>;
 export type ReorderClientType = z.infer<typeof ReorderClientSchema>;
 export type SetListeningSourceType = z.infer<typeof SetListeningSourceSchema>;
-export type ReorderAudioSourcesType = z.infer<typeof ReorderAudioSourcesSchema>;
 
 // Mapped type to access request types by their type field
 export type ExtractWSRequestFrom = {

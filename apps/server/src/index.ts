@@ -2,6 +2,7 @@ import { ADMIN_SECRET, IS_DEMO_MODE } from "@/demo";
 import { validateR2Config } from "@/lib/r2";
 import { BackupManager } from "@/managers/BackupManager";
 import { getActiveRooms } from "@/routes/active";
+import { handleAdmin } from "@/routes/admin";
 import { handleGetDefaultAudio } from "@/routes/default";
 import { handleServeAudio } from "@/routes/demoAudio";
 import { handleDiscover } from "@/routes/discover";
@@ -44,6 +45,11 @@ const server = Bun.serve<WSData>({
     }
 
     try {
+      // Operator surface (fail-closed 404 without OPERATOR_SECRET; no CORS).
+      if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) {
+        return await handleAdmin(req, url);
+      }
+
       // Demo mode: serve local audio files
       if (IS_DEMO_MODE && url.pathname.startsWith("/audio/")) {
         return handleServeAudio(url.pathname);

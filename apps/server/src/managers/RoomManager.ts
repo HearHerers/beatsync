@@ -96,6 +96,9 @@ const RoomBackupSchema = z.object({
     .optional(),
   /** Per-context playlist state — single source of truth for room audio. */
   playlists: z.array(PlaylistBackupSchema),
+  /** Display name for the room, set by an admin. Audio rooms and map rooms both
+   *  use it — UI falls back to "Room <id>" when unset. */
+  roomName: z.string().optional(),
   /** Map-room state. Only meaningful when roomType === "map". */
   roomType: RoomTypeEnum.optional(),
   mapMetadata: MapMetadataSchema.optional(),
@@ -103,6 +106,8 @@ const RoomBackupSchema = z.object({
   shapes: z.array(ShapeSchema).optional(),
   /** Recoverable per-room admin token (non-demo). */
   adminToken: z.string().optional(),
+  /** Operator soft-delete: hidden from discovery, joins rejected, R2 audio kept. */
+  archived: z.boolean().optional(),
 });
 export type RoomBackupType = z.infer<typeof RoomBackupSchema>;
 
@@ -229,13 +234,18 @@ export class RoomManager {
 
   private demoAudioReadyClients = new Set<string>();
 
-  // Map-room state. roomType is fixed for the room's lifetime (set by the first
-  // connecting client via the WS upgrade ?roomType query param). When 'audio',
+  // Map-room state. roomType is fixed for the room's lifetime (set by the client
+  // that creates the room via the WS upgrade ?roomType query param). When 'audio',
   // shape methods refuse to mutate. When 'map', shapes is the authoritative
   // geometry registry — each shape has a corresponding playlist context with
   // id = shape.id (the playlist holds its tracks + playback state).
   private roomType: RoomTypeValue = "audio";
   private mapMetadata?: MapMetadataType;
+  private roomName?: string;
+  // Operator soft-delete (see routes/admin.ts). Persisted in the room backup;
+  // an archived room stays resident with its R2 audio but is hidden from
+  // discovery and rejects new WS joins until unarchived.
+  private archived = false;
   // Admin-chosen room-wide default base map. Undefined = clients use their
   // build default (Mapbox if a token is set, else Esri).
   private defaultTileLayerId?: MapTileLayerId;
@@ -1165,11 +1175,13 @@ export class RoomManager {
         loop: p.loop,
         playbackState: { ...p.playback },
       })),
+      ...(this.roomName && { roomName: this.roomName }),
       ...(this.roomType !== "audio" && { roomType: this.roomType }),
       ...(this.mapMetadata && { mapMetadata: this.mapMetadata }),
       ...(this.defaultTileLayerId && { defaultTileLayerId: this.defaultTileLayerId }),
       ...(this.shapes.size > 0 && { shapes: Array.from(this.shapes.values()) }),
       ...(this.adminToken && { adminToken: this.adminToken }),
+      ...(this.archived && { archived: true }),
     };
   }
 
@@ -1197,6 +1209,37 @@ export class RoomManager {
       this.shapes.clear();
       for (const s of backup.shapes) this.shapes.set(s.id, s);
     }
+  }
+
+  /** Operator soft-delete flag (persisted via createBackup / restore). */
+  isArchived(): boolean {
+    return this.archived;
+  }
+  setArchived(archived: boolean): void {
+    this.archived = archived;
+  }
+
+  /**
+   * Close every live WebSocket in the room (operator archive/delete). The
+   * close handlers take care of client removal and last-disconnect logic.
+   */
+  evictAllClients(reason: string): void {
+    for (const ws of this.wsConnections.values()) {
+      try {
+        ws.close(1000, reason);
+      } catch {
+        // socket already closing/closed — removeClient will still run
+      }
+    }
+  }
+
+  /** Display name for the room. Empty string clears it (UI falls back to "Room <id>"). */
+  getRoomName(): string | undefined {
+    return this.roomName;
+  }
+  setRoomName(name: string): void {
+    const trimmed = name.trim().slice(0, 80);
+    this.roomName = trimmed.length === 0 ? undefined : trimmed;
   }
 
   /**
@@ -1402,15 +1445,6 @@ export class RoomManager {
     }
   }
 
-  reorderAudioSource(newOrder: AudioSourceType[]): void | Error {
-    if (newOrder.length !== this.audioSources.length) {
-      console.warn(`Attempted to reorder audio sources with mismatched length in room ${this.roomId}`);
-      return new Error(`Mismatched audio sources length`);
-    }
-
-    this.audioSources = newOrder;
-  }
-
   // ── Per-context playlist API ────────────────────────────────────────
   //
   // The methods above all operate on the "main" context implicitly via the
@@ -1481,6 +1515,28 @@ export class RoomManager {
   }
 
   /**
+   * Append multiple tracks to a context in order, de-duplicating by URL against
+   * both the existing playlist and earlier entries in the same batch. Used by
+   * playlist import. Returns the updated tracks, or undefined if the playlist
+   * doesn't exist.
+   */
+  addTracksToContext(contextId: string, sources: AudioSourceType[]): AudioSourceType[] | undefined {
+    const playlist = this.playlists.get(contextId);
+    if (!playlist) return undefined;
+    const seen = new Set(playlist.tracks.map((t) => t.url));
+    const additions: AudioSourceType[] = [];
+    for (const source of sources) {
+      if (seen.has(source.url)) continue;
+      seen.add(source.url);
+      additions.push(source);
+    }
+    if (additions.length > 0) {
+      playlist.tracks = [...playlist.tracks, ...additions];
+    }
+    return playlist.tracks;
+  }
+
+  /**
    * Remove a track from a specific context's playlist. If the removed track was
    * currently playing, the playback resets to paused. Returns { tracks,
    * removedCurrent } or undefined if the playlist is missing.
@@ -1497,6 +1553,39 @@ export class RoomManager {
       playlist.playback = { ...INITIAL_PLAYLIST_PLAYBACK };
     }
     return { tracks: playlist.tracks, removedCurrent: removingCurrent };
+  }
+
+  /**
+   * Reorder a context's playlist to match `orderedUrls`. `orderedUrls` must be a
+   * permutation of the playlist's current track URLs — same length and same set;
+   * otherwise the order is stale (e.g. a concurrent add/remove) and is rejected
+   * so the client can resync from the authoritative snapshot. The existing source
+   * objects are reused, so S3/Navidrome metadata is preserved. Playback is keyed
+   * by URL (not index), so reordering a playing playlist is safe and leaves the
+   * current track untouched. Returns the reordered tracks, undefined if the
+   * playlist doesn't exist, or an Error if `orderedUrls` isn't a permutation.
+   */
+  reorderTrackInContext(contextId: string, orderedUrls: string[]): AudioSourceType[] | Error | undefined {
+    const playlist = this.playlists.get(contextId);
+    if (!playlist) return undefined;
+
+    const byUrl = new Map(playlist.tracks.map((t) => [t.url, t]));
+    if (orderedUrls.length !== playlist.tracks.length) {
+      return new Error(`Reorder length mismatch for context ${contextId} in room ${this.roomId}`);
+    }
+    const reordered: AudioSourceType[] = [];
+    const seen = new Set<string>();
+    for (const url of orderedUrls) {
+      const source = byUrl.get(url);
+      if (!source || seen.has(url)) {
+        return new Error(`Reorder is not a permutation of context ${contextId} tracks in room ${this.roomId}`);
+      }
+      seen.add(url);
+      reordered.push(source);
+    }
+
+    playlist.tracks = reordered;
+    return reordered;
   }
 
   /**
@@ -1526,9 +1615,9 @@ export class RoomManager {
   }
 
   /**
-   * Set the room's type. The first client to connect wins; subsequent attempts
-   * to change the type after clients have joined throw. Idempotent for same-
-   * value sets.
+   * Set the room's type. Only meant for brand-new rooms (the creating client
+   * wins — see handleOpen); attempts to change the type while clients are
+   * connected throw. Idempotent for same-value sets.
    */
   setRoomType(roomType: RoomTypeValue): void {
     if (this.roomType === roomType) return;
@@ -1607,6 +1696,24 @@ export class RoomManager {
     const existing = this.shapes.get(shapeId);
     if (!existing) return false;
     this.shapes.set(shapeId, { ...existing, falloffMeters });
+    return true;
+  }
+
+  /**
+   * Set a shape's display name. Empty string clears it (UI falls back to
+   * "Zone <id>"). Returns false if the shape doesn't exist.
+   */
+  setShapeName(shapeId: string, name: string): boolean {
+    const existing = this.shapes.get(shapeId);
+    if (!existing) return false;
+    const trimmed = name.trim().slice(0, 80);
+    const next = { ...existing };
+    if (trimmed.length === 0) {
+      delete next.name;
+    } else {
+      next.name = trimmed;
+    }
+    this.shapes.set(shapeId, next);
     return true;
   }
 
