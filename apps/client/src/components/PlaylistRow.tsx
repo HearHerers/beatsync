@@ -170,6 +170,11 @@ export const PlaylistRow = ({
             )}
           >
             {extractFileNameFromUrl(sourceState.source.url)}
+            {sourceState.source.beatgrid && (
+              <span className="ml-2 rounded bg-neutral-800 px-1 py-0.5 font-mono text-[10px] text-neutral-400">
+                {sourceState.source.beatgrid.bpm}
+              </span>
+            )}
             {isError && sourceState.error && <span className="text-xs text-red-400 ml-2">({sourceState.error})</span>}
           </div>
         </div>
