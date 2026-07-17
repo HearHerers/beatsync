@@ -56,10 +56,20 @@ export const BeatgridSchema = z.object({
 });
 export type BeatgridType = z.infer<typeof BeatgridSchema>;
 
+/**
+ * Where a track's beatgrid came from. "manual" = imported by a curator
+ * (SET_TRACK_BEATGRID); "auto" = attached by the server's BeatgridIndex.
+ * Reload backfills may correct "auto" grids but never touch "manual" ones —
+ * a grid with no source predates provenance and is treated as manual.
+ */
+export const BeatgridSourceEnum = z.enum(["auto", "manual"]);
+export type BeatgridSourceType = z.infer<typeof BeatgridSourceEnum>;
+
 export const AudioSourceSchema = z.object({
   url: z.string(),
-  /** Present once a curator imports beatgrid data for this track. */
+  /** Present once beatgrid data is attached (curator import or server autoload). */
   beatgrid: BeatgridSchema.optional(),
+  beatgridSource: BeatgridSourceEnum.optional(),
 });
 export type AudioSourceType = z.infer<typeof AudioSourceSchema>;
 

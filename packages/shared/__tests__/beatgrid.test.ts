@@ -1,9 +1,17 @@
-// Tests for beatgrid import matching: filename first, then title/artist
+// Tests for beatgrid matching primitives: filename first, then title/artist
 // metadata (covers Navidrome-streamed tracks stored as "Artist - Title"),
-// with ambiguous keys discarded rather than guessed.
+// ambiguous keys discarded rather than guessed, and normalization that
+// canonicalizes representation (sanitizer parity, NFC, dash/whitespace
+// folding) without relaxing exactness. See BEATGRID_MATCHING_PLAN.md.
 
 import { describe, expect, it } from "bun:test";
-import { matchBeatgridsToTracks, type BeatgridExportType } from "@/lib/beatgridFile";
+import {
+  buildBeatgridKeyMap,
+  matchBeatgridsToTracks,
+  normalizeName,
+  sanitizeDisplayName,
+  type BeatgridExportType,
+} from "../beatgrid";
 
 // Real extracted values (rekordbox-integration/beatgrids.json).
 const HEAT3 = {
@@ -11,6 +19,7 @@ const HEAT3 = {
   title: "Heat 3",
   artist: "Shinichi Atobe",
   bpm: 123.0,
+  durationSec: 577,
   firstBeatSec: 0.052,
   firstDownbeatSec: 0.052,
   beatsPerBar: 4,
@@ -96,5 +105,74 @@ describe("matchBeatgridsToTracks", () => {
     // noMeta only has its filename key, which doesn't match the streamed name.
     expect(r.matches).toHaveLength(0);
     expect(r.unmatchedFiles).toEqual([BUMP.file]);
+  });
+});
+
+describe("normalizeName hardening (BEATGRID_MATCHING_PLAN.md)", () => {
+  it("sanitizer parity: export filenames with R2-sanitized characters still match", () => {
+    // "Twelve:34.flac" uploads as display name "Twelve*34" (sanitize replaces
+    // the colon). The export side keys on the raw filename — parity in
+    // normalizeName makes both sides "twelve*34".
+    const entry = { ...HEAT3, file: "Twelve:34.flac", title: null, artist: null };
+    const r = matchBeatgridsToTracks(doc([entry]), [r2Url(sanitizeDisplayName("Twelve:34"))]);
+    expect(r.matches).toHaveLength(1);
+  });
+
+  it("Unicode NFC: NFD-encoded room names (Mac uploads) match NFC export names", () => {
+    const nfdName = "Café del Mar".normalize("NFD");
+    const nfcFile = "Café del Mar.flac".normalize("NFC");
+    expect(nfdName).not.toBe(nfcFile.replace(/\.[^/.]+$/, "")); // really different bytes
+    const entry = { ...HEAT3, file: nfcFile, title: null, artist: null };
+    const r = matchBeatgridsToTracks(doc([entry]), [r2Url(nfdName)]);
+    expect(r.matches).toHaveLength(1);
+  });
+
+  it("folds dash variants and collapses whitespace in metadata keys", () => {
+    // Provider display name joined with an en dash and doubled spaces.
+    const r = matchBeatgridsToTracks(doc([HEAT3]), [r2Url("Shinichi Atobe  –  Heat 3")]);
+    expect(r.matches).toHaveLength(1);
+    expect(r.matchedByMetadata).toBe(1);
+  });
+
+  it("stays exact: a different title does not fuzzy-match", () => {
+    const r = matchBeatgridsToTracks(doc([HEAT3]), [r2Url("Heat 33")]);
+    expect(r.matches).toHaveLength(0);
+  });
+});
+
+describe("buildBeatgridKeyMap (server index shape)", () => {
+  it("indexes every unambiguous key of constant-grid entries", () => {
+    const { byKey, tracks, skippedDynamic, ambiguousKeys } = buildBeatgridKeyMap(doc([HEAT3, BUMP]));
+    expect(tracks).toBe(2);
+    expect(skippedDynamic).toBe(0);
+    expect(ambiguousKeys).toBe(0);
+    // filename, artist-title, and title keys for each entry.
+    expect(byKey.get(normalizeName(HEAT3.file))?.bpm).toBe(123.0);
+    expect(byKey.get(normalizeName("Shinichi Atobe - Heat 3"))?.bpm).toBe(123.0);
+    expect(byKey.get(normalizeName("Bump Talkin"))?.bpm).toBe(132.4);
+  });
+
+  it("discards ambiguous keys but keeps each entry's unique keys", () => {
+    const remix = { ...BUMP, file: "01 - Heat 3 (Remix).flac", title: "Heat 3", artist: "Someone Else" };
+    const { byKey, ambiguousKeys } = buildBeatgridKeyMap(doc([HEAT3, remix]));
+    expect(ambiguousKeys).toBe(1); // the shared bare title
+    expect(byKey.has(normalizeName("Heat 3"))).toBe(false);
+    expect(byKey.get(normalizeName("Shinichi Atobe - Heat 3"))?.bpm).toBe(123.0);
+    expect(byKey.get(normalizeName("Someone Else - Heat 3"))?.bpm).toBe(132.4);
+  });
+
+  it("skips dynamic entries entirely", () => {
+    const dynamic = { ...HEAT3, grid: "dynamic" as const };
+    const { byKey, tracks, skippedDynamic } = buildBeatgridKeyMap(doc([dynamic]));
+    expect(tracks).toBe(0);
+    expect(skippedDynamic).toBe(1);
+    expect(byKey.size).toBe(0);
+  });
+
+  it("resolves the same key repeatedly (no per-lookup claiming)", () => {
+    const { byKey } = buildBeatgridKeyMap(doc([HEAT3]));
+    const key = normalizeName(HEAT3.file);
+    expect(byKey.get(key)).toBe(byKey.get(key));
+    expect(byKey.get(key)?.durationSec).toBe(577);
   });
 });

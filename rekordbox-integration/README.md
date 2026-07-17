@@ -62,16 +62,27 @@ profile).
 ### Workflow
 
 ```
-Rekordbox: analyze tracks, quit the app
-        │  ./sync_rekordbox_db.sh   (rsync master.db + share/, no audio)
+Rekordbox computer: analyze tracks, quit the app
+        │  1. extract_beatgrids.py --all   (beatgrids.json, local)
+        │  2. ./sync_rekordbox_db.sh       (rsync beatgrids.json + hot reload)
         ▼
-Server: extract_beatgrids.py  →  beatgrids.json     (headless, automatable)
+Server: beatsync autoloads beatgrids.json (REKORDBOX_BEATGRIDS_PATH) and
+        auto-attaches grids to tracks entering any room — no client-side
+        import needed.
 ```
 
-`sync_rekordbox_db.sh` pushes `master.db` + `share/` from
-`~/Library/Pioneer/rekordbox` to the server (config via `REKORDBOX_SRC_DIR`,
-`REKORDBOX_SERVER_SSH`, `REKORDBOX_DEST_DIR`; refuses to run while Rekordbox is
-open). Then on the server:
+`sync_rekordbox_db.sh` pushes the local `beatgrids.json` to
+`$REKORDBOX_DEST_DIR/beatgrids.json` (config via `REKORDBOX_SERVER_SSH`,
+`REKORDBOX_DEST_DIR`), then POSTs `/admin/beatgrids/reload` (when
+`BEATSYNC_SERVER_URL` + `OPERATOR_SECRET` are set) so the running server
+re-matches every room's tracks immediately. Without the reload call the file
+is picked up on the next server start. Manual import through the client UI
+still works as an override — grids imported that way are marked `manual` and
+never overwritten by autoload.
+
+Alternatively, `./sync_rekordbox_db.sh --db` also pushes `master.db` + the
+`share/` ANLZ tree (Rekordbox must be closed) so extraction can run headless
+on the server instead:
 
 ```bash
 REKORDBOX_DB_PATH=/srv/rekordbox/master.db \
@@ -79,8 +90,8 @@ REKORDBOX_DB_DIR=/srv/rekordbox \
 python extract_beatgrids.py --all -o beatgrids.json
 ```
 
-The exported `beatgrids.json` is only as current as the last sync — re-run
-`sync_rekordbox_db.sh` after analyzing new tracks.
+The server-side `beatgrids.json` is only as current as the last push — re-run
+`extract_beatgrids.py` + `sync_rekordbox_db.sh` after analyzing new tracks.
 
 ## Output format
 

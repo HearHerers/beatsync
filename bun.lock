@@ -109,6 +109,7 @@
     "packages/shared": {
       "name": "@beatsync/shared",
       "dependencies": {
+        "sanitize-filename": "^1.6.3",
         "zod": "^4.3.6",
       },
       "devDependencies": {
