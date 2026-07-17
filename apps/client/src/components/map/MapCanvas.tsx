@@ -6,6 +6,7 @@
 // position updates) are sent via WebSocket using sendWSRequest.
 
 import { useClientId } from "@/hooks/useClientId";
+import { emojiForId } from "@/lib/avatarEmoji";
 import { getShapeCircle, getShapePolygonRing, outwardOffsetPolygonRing } from "@/lib/geo";
 import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
@@ -33,36 +34,19 @@ L.Marker.prototype.options.icon = DefaultIcon;
 /**
  * Build a "balloon over a precise dot" Leaflet divIcon for a user marker.
  * Layout (top to bottom):
- *   - 28px avatar circle (country flag if available, else two-letter initials).
- *     Admin gets a small yellow crown badge in the corner.
+ *   - 28px avatar circle showing the user's creature emoji (#98). Admin gets a
+ *     small yellow crown badge in the corner.
  *   - 6px white stem.
  *   - 8px dot anchored at the bottom — this is the geographic anchor point so
  *     dragging keeps the geo position accurate.
  * Total icon: 28 × 44px, anchored at bottom-center.
  */
-function buildUserAvatarIcon(opts: {
-  username: string;
-  flagUrl?: string;
-  isAdmin: boolean;
-  isSelf: boolean;
-}): L.DivIcon {
-  const { username, flagUrl, isAdmin, isSelf } = opts;
+function buildUserAvatarIcon(opts: { emoji: string; isAdmin: boolean; isSelf: boolean }): L.DivIcon {
+  const { emoji, isAdmin, isSelf } = opts;
   const accent = isSelf ? "#22c55e" : "#3b82f6";
-  const initials = username
-    .split(/[-\s]+/)
-    .map((part) => part[0] ?? "")
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
-  // Escape HTML in user-controlled strings (the flag URL comes from our own
-  // IP-geo helper so it's safer, but be defensive on the username initials).
-  const safeInitials = initials.replace(/[<>&"']/g, "");
-  const safeFlagUrl = flagUrl?.replace(/[<>"']/g, "");
-
-  const inner = safeFlagUrl
-    ? `<img src="${safeFlagUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" onerror="this.parentElement.innerHTML='<span style=color:white;font-size:11px;font-weight:600;letter-spacing:0.5px>${safeInitials}</span>';this.parentElement.style.background='${accent}'" />`
-    : `<span style="color:#fff;font-size:11px;font-weight:600;letter-spacing:0.5px">${safeInitials}</span>`;
+  // Defensive escape (emoji come from our own curated set, but never inject raw).
+  const safeEmoji = emoji.replace(/[<>&"']/g, "");
+  const inner = `<span style="font-size:16px;line-height:1">${safeEmoji}</span>`;
 
   const crown = isAdmin
     ? `<div style="position:absolute;top:-3px;right:-3px;background:#eab308;border-radius:50%;width:12px;height:12px;display:flex;align-items:center;justify-content:center;border:1px solid #fff">
@@ -205,6 +189,7 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   const selectedShapeId = useMapStore((s) => s.selectedShapeId);
   const ownPosition = useMapStore((s) => s.ownPosition);
   const setOwnPosition = useMapStore((s) => s.setOwnPosition);
+  const pendingRecenter = useMapStore((s) => s.pendingRecenter);
   const { clientId: myClientId } = useClientId();
 
   // Keep Leaflet's internal size cache in sync with the container. Required
@@ -488,6 +473,23 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     }
   }, [mapMetadata]);
 
+  // Center on the user's own position when requested (#66 GPS-switch, #67 button).
+  // Waits until a position is actually available — arming the request before the
+  // first GPS fix lands is fine; this fires as soon as ownPosition appears.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!pendingRecenter || !map || !ownPosition) return;
+    // Two MapCanvas instances are mounted at once (desktop + mobile layouts;
+    // the inactive one is display:none, so its map is 0×0). flyTo on a
+    // zero-size map divides by zero in Leaflet's flight math and throws
+    // "Invalid LatLng (NaN, NaN)", crashing the app. Skip without consuming
+    // so the visible instance handles the recenter instead.
+    const size = map.getSize();
+    if (size.x === 0 || size.y === 0) return;
+    map.flyTo([ownPosition.lat, ownPosition.lng], Math.max(map.getZoom(), 18), { duration: 0.6 });
+    useMapStore.getState().consumeRecenter();
+  }, [pendingRecenter, ownPosition]);
+
   // ── Sync shapes → Leaflet layers ────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
@@ -654,8 +656,7 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
       const existing = otherMarkersRef.current.get(client.clientId);
       const pos: L.LatLngTuple = [client.geoPosition.lat, client.geoPosition.lng];
       const icon = buildUserAvatarIcon({
-        username: client.username,
-        flagUrl: client.location?.flagSvgURL,
+        emoji: emojiForId(client.clientId),
         isAdmin: !!client.isAdmin,
         isSelf: false,
       });
@@ -698,8 +699,7 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     const pos: L.LatLngTuple = [ownPosition.lat, ownPosition.lng];
     const me = connectedClients.find((c) => c.clientId === myClientId);
     const selfIcon = buildUserAvatarIcon({
-      username: me?.username ?? "You",
-      flagUrl: me?.location?.flagSvgURL,
+      emoji: emojiForId(myClientId),
       isAdmin: !!me?.isAdmin,
       isSelf: true,
     });

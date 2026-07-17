@@ -13,8 +13,8 @@ export const AnnouncementBanner = () => {
       <div className="relative">
         <div className="container mx-auto px-4 py-3">
           <p className="text-xs sm:text-sm font-medium text-center">
-            <span className="font-semibold">{"Mar 8, 2026: "}</span>
-            Sync algorithm improvements — better, faster, stronger.
+            <span className="font-semibold">HearHere: </span>
+            sound around somewhere together in sync
             {/* <a
               href="#"
               className="ml-3 inline-flex items-center text-white underline hover:no-underline font-semibold"
