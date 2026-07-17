@@ -15,9 +15,12 @@ interface AddTracksProps {
   label?: string;
   /** Destination noun for the pool ("Room Pool") — drives the upload/URL copy. */
   destination?: string;
+  /** Render search results in document flow (single-scroll panel) rather than
+   * as a floating overlay. See InlineSearch. */
+  inlineResults?: boolean;
 }
 
-export function AddTracks({ contextId, label, destination }: AddTracksProps) {
+export function AddTracks({ contextId, label, destination, inlineResults }: AddTracksProps) {
   return (
     <Tabs defaultValue="search" className="flex flex-col gap-2">
       <TabsList className="h-7 w-full">
@@ -33,7 +36,7 @@ export function AddTracks({ contextId, label, destination }: AddTracksProps) {
       </TabsList>
 
       <TabsContent value="search" className="data-[state=inactive]:hidden">
-        <InlineSearch contextId={contextId} />
+        <InlineSearch contextId={contextId} inlineResults={inlineResults} />
       </TabsContent>
       <TabsContent value="upload" className="data-[state=inactive]:hidden">
         <AudioUploaderMinimal contextId={contextId} label={label} destination={destination} only="upload" />
