@@ -2,6 +2,7 @@ import { calculateScheduleTimeMs, DEFAULT_CLIENT_RTT_MS } from "@/config";
 import { IS_DEMO_MODE } from "@/demo";
 import { deleteObjectsWithPrefix } from "@/lib/r2";
 import { computeZoneSync } from "@/lib/zoneSync";
+import { getBeatgridIndex } from "@/managers/BeatgridIndex";
 import { ChatManager } from "@/managers/ChatManager";
 import { calculateGainFromDistanceToSource } from "@/spatial";
 import { debounce } from "@/utils/debounce";
@@ -10,6 +11,7 @@ import { positionClientsInCircle } from "@/utils/spatial";
 import type { BunServer, WSData } from "@/utils/websocket";
 import type {
   AudioSourceType,
+  BeatgridSourceType,
   BeatgridType,
   ChatMessageType,
   ClientDataType,
@@ -29,6 +31,7 @@ import type {
   WSBroadcastType,
 } from "@beatsync/shared";
 import {
+  beatgridsEqual,
   ChatMessageSchema,
   ClientDataSchema,
   epochNow,
@@ -899,8 +902,20 @@ export class RoomManager {
    * Add an audio source to the room
    */
   addAudioSource(source: AudioSourceType): AudioSourceType[] {
-    this.audioSources.push(source);
+    this.audioSources.push(this.withAutoBeatgrid(source));
     return this.audioSources;
+  }
+
+  /**
+   * Fill in a beatgrid from the server's Rekordbox index when the source has
+   * none (see BEATGRID_AUTOLOAD_PLAN.md). No-op when the track is already
+   * gridded or the collection has no unambiguous entry for it.
+   */
+  private withAutoBeatgrid(source: AudioSourceType): AudioSourceType {
+    if (source.beatgrid) return source;
+    const hit = getBeatgridIndex().gridForUrl(source.url);
+    if (!hit) return source;
+    return { ...source, beatgrid: hit.beatgrid, beatgridSource: "auto" };
   }
 
   // Set all audio sources (used in backup restoration)
@@ -1823,18 +1838,47 @@ export class RoomManager {
   /**
    * Attach a beatgrid to every occurrence of a track URL across all contexts —
    * the grid is a property of the audio file, not of any one zone. Returns how
-   * many track entries were updated (0 = URL not in this room).
+   * many track entries were updated (0 = URL not in this room). `source`
+   * defaults to "manual" (curator import); backfills never overwrite those.
    */
-  setTrackBeatgrid(url: string, beatgrid: BeatgridType): number {
+  setTrackBeatgrid(url: string, beatgrid: BeatgridType, source: BeatgridSourceType = "manual"): number {
     let updated = 0;
     for (const playlist of this.playlists.values()) {
       playlist.tracks = playlist.tracks.map((t) => {
         if (t.url !== url) return t;
         updated++;
-        return { ...t, beatgrid };
+        return { ...t, beatgrid, beatgridSource: source };
       });
     }
     return updated;
+  }
+
+  /**
+   * Sweep every playlist and reconcile track grids against the current
+   * BeatgridIndex: ungridded tracks get a grid, "auto" grids the index now
+   * disagrees with are corrected (re-analysis in Rekordbox propagates), and
+   * manual grids — including pre-provenance ones with no beatgridSource — are
+   * never touched. Tracks absent from the index keep whatever they have.
+   *
+   * Runs after startup restore (restorePlaylists bypasses addTrackToContext,
+   * so restored tracks never hit the auto-attach hook) and after an operator
+   * beatgrid reload. Returns how many track entries changed.
+   */
+  backfillBeatgrids(): number {
+    const index = getBeatgridIndex();
+    if (index.size === 0) return 0;
+    let changed = 0;
+    for (const playlist of this.playlists.values()) {
+      playlist.tracks = playlist.tracks.map((t) => {
+        if (t.beatgrid && t.beatgridSource !== "auto") return t; // manual/legacy: never touched
+        const hit = index.gridForUrl(t.url);
+        if (!hit) return t;
+        if (t.beatgrid && beatgridsEqual(t.beatgrid, hit.beatgrid)) return t;
+        changed++;
+        return { ...t, beatgrid: hit.beatgrid, beatgridSource: "auto" };
+      });
+    }
+    return changed;
   }
 
   /**
@@ -1911,11 +1955,13 @@ export class RoomManager {
       for (const pl of this.playlists.values()) {
         const existing = pl.tracks.find((t) => t.url === source.url && t.beatgrid);
         if (existing?.beatgrid) {
-          toAdd = { ...source, beatgrid: existing.beatgrid };
+          toAdd = { ...source, beatgrid: existing.beatgrid, beatgridSource: existing.beatgridSource };
           break;
         }
       }
     }
+    // Still ungridded: consult the server's Rekordbox beatgrid index.
+    toAdd = this.withAutoBeatgrid(toAdd);
     // De-duplicate by URL — re-adding an existing source is a no-op.
     if (!playlist.tracks.some((t) => t.url === source.url)) {
       playlist.tracks = [...playlist.tracks, toAdd];

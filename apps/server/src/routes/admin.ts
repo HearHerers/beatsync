@@ -9,6 +9,11 @@
 //
 //   POST   /admin/backup                 — write a fresh state backup to R2 now
 //                                          (powers `rooms:list --sync`)
+//   POST   /admin/beatgrids/reload       — re-read REKORDBOX_BEATGRIDS_PATH,
+//                                          backfill grids onto resident rooms'
+//                                          tracks, notify changed rooms (the
+//                                          sync pipeline's last step — see
+//                                          rekordbox-integration/post_sync.sh)
 //   POST   /admin/rooms/:id/archive      — soft delete: evict clients, hide from
 //                                          discovery, reject joins; state + R2
 //                                          audio kept, reversible
@@ -25,7 +30,10 @@ import { addTombstone, addTombstones } from "@/admin/registry";
 import { IS_DEMO_MODE } from "@/demo";
 import { deleteObjectsWithPrefix } from "@/lib/r2";
 import { BackupManager } from "@/managers/BackupManager";
+import { reloadBeatgridIndex } from "@/managers/BeatgridIndex";
 import { globalManager } from "@/managers";
+import type { BunServer } from "@/utils/websocket";
+import type { WSBroadcastType } from "@beatsync/shared";
 
 const invisible = () => new Response("Not found", { status: 404 });
 
@@ -39,7 +47,7 @@ async function backupNow(): Promise<void> {
   await BackupManager.backupState();
 }
 
-export async function handleAdmin(req: Request, url: URL): Promise<Response> {
+export async function handleAdmin(req: Request, url: URL, server?: BunServer): Promise<Response> {
   if (IS_DEMO_MODE || !isOperator(req)) return invisible();
 
   if (req.method === "POST" && url.pathname === "/admin/backup") {
@@ -48,6 +56,49 @@ export async function handleAdmin(req: Request, url: URL): Promise<Response> {
     globalManager.forEachRoom(() => rooms++);
     console.log(`🛠️ Operator triggered an on-demand state backup (${rooms} room(s)).`);
     return json({ ok: true, rooms });
+  }
+
+  // Reload the Rekordbox beatgrid index and reconcile every resident room's
+  // tracks against it (attach missing grids, correct stale "auto" grids;
+  // manual grids untouched). On a failed load the previous index stays active.
+  if (req.method === "POST" && url.pathname === "/admin/beatgrids/reload") {
+    const result = reloadBeatgridIndex();
+    if (!result.ok) {
+      console.warn(`🛠️ Operator beatgrid reload failed: ${result.error}`);
+      return json({ ok: false, error: result.error }, 400);
+    }
+    const changedRooms: Record<string, number> = {};
+    let changedTracks = 0;
+    globalManager.forEachRoom((room, roomId) => {
+      const n = room.backfillBeatgrids();
+      if (n === 0) return;
+      changedRooms[roomId] = n;
+      changedTracks += n;
+      // Mirror the new grids into connected clients' playlist views. Publish
+      // on the injected server directly (sendBroadcast is exactly this) so the
+      // route depends only on its own arguments.
+      if (server) {
+        const message: WSBroadcastType = {
+          type: "ROOM_EVENT",
+          event: { type: "PLAYLISTS_UPDATE", playlists: room.getPlaylistsView() },
+        };
+        server.publish(roomId, JSON.stringify(message));
+      }
+    });
+    // Grids live in playlist state; snapshot so the change survives a crash.
+    if (changedTracks > 0) await backupNow();
+    console.log(
+      `🛠️ Operator reloaded beatgrids (${result.index.tracks} track(s) in index; ` +
+        `${changedTracks} track entr(ies) updated across ${Object.keys(changedRooms).length} room(s)).`
+    );
+    return json({
+      ok: true,
+      indexTracks: result.index.tracks,
+      skippedDynamic: result.index.skippedDynamic,
+      ambiguousKeys: result.index.ambiguousKeys,
+      changedTracks,
+      changedRooms,
+    });
   }
 
   // Purge: wipe EVERY room — state, R2 audio (including orphaned room-* audio

@@ -9,9 +9,8 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { R2_AUDIO_FILE_NAME_DELIMITER } from "@beatsync/shared";
+import { R2_AUDIO_FILE_NAME_DELIMITER, sanitizeDisplayName } from "@beatsync/shared";
 import { config } from "dotenv";
-import sanitize from "sanitize-filename";
 
 config();
 
@@ -181,22 +180,9 @@ export function generateAudioFileName(originalName: string): string {
   // Remove extension from name for processing
   const nameWithoutExt = originalName.replace(/\.[^/.]+$/, "");
 
-  // Remove slashes from the original name
-  const nameWithoutSlashes = nameWithoutExt.replace(/[/\\]/g, "-");
-
-  // Sanitize filename using the library
-  let safeName = sanitize(nameWithoutSlashes, { replacement: "*" });
-
-  // Truncate if too long (leave room for timestamp and extension)
-  const maxNameLength = 400;
-  if (safeName.length > maxNameLength) {
-    safeName = safeName.substring(0, maxNameLength);
-  }
-
-  // Fallback if name becomes empty after sanitization
-  if (!safeName) {
-    safeName = "audio";
-  }
+  // Sanitize via the shared helper — beatgrid matching (normalizeName) applies
+  // the same transform to export-side filenames, so the two sides can't drift.
+  const safeName = sanitizeDisplayName(nameWithoutExt);
 
   // Generate timestamp with date and random component
   const now = new Date();
