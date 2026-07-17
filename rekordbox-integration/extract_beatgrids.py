@@ -28,8 +28,14 @@ import sys
 import time
 
 import numpy as np
-from pyrekordbox import MasterDatabase
-from pyrekordbox.masterdb.models import DjmdContent
+try:  # pyrekordbox >= 0.4.5.dev (new layout)
+    from pyrekordbox import MasterDatabase
+    from pyrekordbox.masterdb.models import DjmdContent
+except ImportError:  # pyrekordbox <= 0.4.4 (installed here)
+    from pyrekordbox import Rekordbox6Database as MasterDatabase
+    from pyrekordbox.db6.tables import DjmdContent
+import logging
+logging.getLogger("pyrekordbox").setLevel(logging.ERROR)
 
 # Above this worst-case deviation between the constant-BPM model and the actual
 # per-beat grid, the track is treated as dynamic-tempo and full markers are
@@ -51,7 +57,10 @@ def read_beat_grid(db: MasterDatabase, content: DjmdContent):
         log(f"  ! ANLZ read failed for {content.Title!r}: {e!r}")
         return None
     for _path, anlz in anlz_files.items():
-        grid = anlz.get("beat_grid")
+        try:
+            grid = anlz.get("beat_grid")
+        except (IndexError, KeyError):
+            continue  # this ANLZ file (e.g. .EXT) has no beat-grid tag
         if grid is not None:
             beat_num, bpm_arr, t = (np.asarray(a) for a in grid)
             if len(t) >= 2:
@@ -143,12 +152,31 @@ def main() -> int:
     sel.add_argument("--folder", metavar="PREFIX", help="only tracks whose file path starts with this prefix; also preferred when deduping")
     sel.add_argument("--all", action="store_true", help="the entire collection")
     ap.add_argument("-o", "--output", default="beatgrids.json", help="output path (default: %(default)s)")
+    src = ap.add_argument_group("database location (for running against a copied DB, e.g. a server)")
+    src.add_argument(
+        "--db-path",
+        default=os.environ.get("REKORDBOX_DB_PATH"),
+        metavar="FILE",
+        help="path to master.db (env: REKORDBOX_DB_PATH). Omit to auto-detect a local Rekordbox install.",
+    )
+    src.add_argument(
+        "--db-dir",
+        default=os.environ.get("REKORDBOX_DB_DIR", ""),
+        metavar="DIR",
+        help="directory holding master.db and the share/ ANLZ tree (env: REKORDBOX_DB_DIR). "
+        "Defaults to the parent of --db-path.",
+    )
     args = ap.parse_args()
 
     if not (args.filter or args.folder or args.all):
         ap.error("select tracks with --filter, --folder, or --all")
 
-    db = MasterDatabase()
+    # With no explicit path/dir this falls back to pyrekordbox auto-detection of a
+    # local Rekordbox install (the Mac case). On a server with only a copied DB,
+    # point --db-dir (or REKORDBOX_DB_DIR) at the directory that holds both
+    # master.db and share/ — the SQLCipher key is bundled in pyrekordbox, so no
+    # Rekordbox install is needed. See README ("Running against a copied DB").
+    db = MasterDatabase(path=args.db_path or None, db_dir=args.db_dir)
     q = db.query(DjmdContent)
     if args.folder:
         q = q.filter(DjmdContent.FolderPath.startswith(args.folder))
