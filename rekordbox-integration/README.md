@@ -80,6 +80,31 @@ is picked up on the next server start. Manual import through the client UI
 still works as an override — grids imported that way are marked `manual` and
 never overwritten by autoload.
 
+#### Server setup (one-time)
+
+The beatsync server only autoloads the export if `REKORDBOX_BEATGRIDS_PATH`
+is set in **its** environment (`apps/server/.env`, or the PM2/systemd/Docker
+env for a deployment) and points at the file the sync script pushes:
+
+```bash
+# apps/server/.env on the server — same file sync_rekordbox_db.sh writes,
+# i.e. $REKORDBOX_DEST_DIR/beatgrids.json:
+REKORDBOX_BEATGRIDS_PATH=/srv/rekordbox/beatgrids.json
+```
+
+Unset/missing is fail-open: the server runs normally with autoload disabled
+(manual import still works). Confirm it took on startup — the server logs
+either
+
+```
+🎚️  Beatgrid index loaded from /srv/rekordbox/beatgrids.json: 42 track(s), ...
+ℹ️  REKORDBOX_BEATGRIDS_PATH not set; beatgrid autoload disabled ...
+```
+
+For the hot reload the sync script needs the same `OPERATOR_SECRET` the
+server was started with (the `/admin/*` bearer; see the server `.env` docs
+in `beatsync/CLAUDE.md`).
+
 Alternatively, `./sync_rekordbox_db.sh --db` also pushes `master.db` + the
 `share/` ANLZ tree (Rekordbox must be closed) so extraction can run headless
 on the server instead:

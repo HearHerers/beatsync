@@ -6,8 +6,8 @@
 // Loading model: REKORDBOX_BEATGRIDS_PATH names the export JSON on this host.
 // Loaded once at startup (fail-open: unset/missing/invalid ⇒ empty index and
 // everything else works) and reloaded explicitly via POST
-// /admin/beatgrids/reload after each DB sync. No fs.watch — reload is a
-// deliberate step of the sync pipeline (rekordbox-integration/post_sync.sh).
+// /admin/beatgrids/reload after each export push. No fs.watch — reload is a
+// deliberate step of the sync pipeline (rekordbox-integration/sync_rekordbox_db.sh).
 //
 // The module-level current index is swapped whole (never mutated), so lookups
 // racing a reload see either the old or the new index, both consistent. Tests
