@@ -94,6 +94,7 @@ The exported `beatgrids.json` is only as current as the last sync — re-run
       "title": "Heat 3",
       "artist": "Shinichi Atobe",
       "bpm": 123.0,
+      "durationSec": 577,
       "firstBeatSec": 0.052,
       "firstDownbeatSec": 0.052,
       "beatsPerBar": 4,
@@ -105,6 +106,10 @@ The exported `beatgrids.json` is only as current as the last sync — re-run
 }
 ```
 
+- `durationSec` is the track length from the DB. Consumers use it as a sanity
+  check against the decoded audio's real duration to catch wrong-version
+  matches (radio edit vs. extended mix sharing a filename/title). Omitted if
+  the DB has no length for the track.
 - `bpm` + `firstDownbeatSec` are the two numbers zone-sync actually consumes:
   follower rate = `bpm_master / bpm_follower`, and phase anchors compute from
   the downbeat. `beatsPerBar` enables bar-quantized (vs beat-quantized) sync.

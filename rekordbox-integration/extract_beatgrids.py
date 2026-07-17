@@ -96,6 +96,12 @@ def build_track_entry(db: MasterDatabase, content: DjmdContent):
         "title": content.Title,
         "artist": content.Artist.Name if content.Artist else None,
         "bpm": headline_bpm,
+        # Track length from the DB (seconds). Consumers use it as a sanity
+        # check against the decoded audio's real duration to catch
+        # wrong-version matches (radio edit vs. extended mix sharing a
+        # filename/title) — see BEATGRID_MATCHING_PLAN.md. Omitted if the DB
+        # has no length for the track.
+        **({"durationSec": int(content.Length)} if content.Length else {}),
         "firstBeatSec": round(float(t[0]), 4),
         "firstDownbeatSec": round(first_downbeat, 4),
         "beatsPerBar": 4,
