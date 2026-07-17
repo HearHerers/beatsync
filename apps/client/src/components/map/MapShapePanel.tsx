@@ -192,7 +192,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
         </TabsList>
       </div>
 
-      <TabsContent value="zone" className="flex min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+      <TabsContent value="zone" className="flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
         {shape ? (
           <ZoneTab />
         ) : (
@@ -209,9 +209,12 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
         )}
       </TabsContent>
 
-      <TabsContent value="pool" className="flex min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+      <TabsContent
+        value="pool"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-muted-foreground/10 scrollbar-track-transparent hover:scrollbar-thumb-muted-foreground/20 data-[state=inactive]:hidden"
+      >
         {canMutate && (
-          <div className="flex items-center justify-between gap-2 border-b border-neutral-800/50 px-4 py-3">
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-neutral-800/50 bg-neutral-900 px-4 py-3">
             <div className="min-w-0 flex-1 text-xs font-medium text-neutral-300">Room Pool</div>
             <div className="flex items-center gap-1">
               <Button
@@ -285,10 +288,10 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
         )}
         {canMutate && (
           <div className="px-3 pt-3">
-            <AddTracks label="Upload to Room Pool" destination="Room Pool" />
+            <AddTracks label="Upload to Room Pool" destination="Room Pool" inlineResults />
           </div>
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-3 scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-muted-foreground/10 scrollbar-track-transparent hover:scrollbar-thumb-muted-foreground/20">
+        <div className="px-3 pb-4 pt-3">
           <RoomPoolList canMutate={canMutate} />
         </div>
 
@@ -342,9 +345,13 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
       });
 
     return (
-      <div className="flex h-full flex-col overflow-hidden">
+      // Single vertical scroll container: header (sticky), falloff, search, and
+      // queue all share one scrollbar so the search stays reachable on a short
+      // panel without dragging the divider. Search results render in-flow
+      // (inlineResults) rather than as a clipped overlay.
+      <div className="flex h-full flex-col overflow-y-auto scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-muted-foreground/10 scrollbar-track-transparent hover:scrollbar-thumb-muted-foreground/20">
         {/* Header */}
-        <div className="flex items-center justify-between gap-2 border-b border-neutral-800/50 px-4 py-3">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-neutral-800/50 bg-neutral-900 px-4 py-3">
           <div className="min-w-0 flex-1">
             <ShapeNameEditor shape={shape} canMutate={canMutate} send={send} />
             <div className="text-[11px] text-neutral-500">{shape.type}</div>
@@ -534,12 +541,12 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
             chosen track straight into this zone's playlist (contextId). */}
         {canMutate && (
           <div className="px-3 pt-3">
-            <AddTracks contextId={shape.id} label={`Upload to ${zoneDisplayName(shape)}`} />
+            <AddTracks contextId={shape.id} label={`Upload to ${zoneDisplayName(shape)}`} inlineResults />
           </div>
         )}
 
-        {/* Queue (scrollable) */}
-        <div className="flex-1 overflow-y-auto px-3 pb-4 pt-3 scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-muted-foreground/10 scrollbar-track-transparent hover:scrollbar-thumb-muted-foreground/20">
+        {/* Queue — grows to natural height; the panel above is the scroller. */}
+        <div className="px-3 pb-4 pt-3">
           <Queue contextId={shape.id} />
         </div>
       </div>

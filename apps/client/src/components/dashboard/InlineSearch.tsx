@@ -19,9 +19,14 @@ interface InlineSearchProps {
   /** When set, streamed tracks are added to this playlist context (e.g. a
    * shape.id in map rooms) rather than the room-wide "main" playlist. */
   contextId?: string;
+  /** Render results in normal document flow beneath the input rather than as a
+   * floating overlay. Used inside a single-scroll panel (map room) so results
+   * are reached by scrolling the panel instead of an overlay that self-caps to
+   * the viewport (and gets clipped by the panel's overflow). */
+  inlineResults?: boolean;
 }
 
-export function InlineSearch({ contextId }: InlineSearchProps = {}) {
+export function InlineSearch({ contextId, inlineResults = false }: InlineSearchProps = {}) {
   const [showResults, setShowResults] = React.useState(false);
   const [isFocused, setIsFocused] = React.useState(false);
   const [showCheckmark, setShowCheckmark] = React.useState(false);
@@ -103,7 +108,7 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
   // Cap the results dropdown to the space below the input (minus the bottom
   // bar), recomputed when it opens and on resize, so it never runs off-screen.
   React.useEffect(() => {
-    if (!showResults) return;
+    if (!showResults || inlineResults) return;
     const compute = () => {
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -113,7 +118,7 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
     compute();
     window.addEventListener("resize", compute);
     return () => window.removeEventListener("resize", compute);
-  }, [showResults]);
+  }, [showResults, inlineResults]);
 
   const runSearch = React.useCallback(
     (raw: string) => {
@@ -326,7 +331,7 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
         </div>
       </form>
 
-      {/* Search Results Dropdown */}
+      {/* Search Results */}
       <AnimatePresence>
         {showResults && canMutate && (
           <motion.div
@@ -334,9 +339,17 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className="absolute top-full mt-2 w-full bg-neutral-900/95 backdrop-blur-xl border border-neutral-700/50 rounded-2xl shadow-2xl overflow-hidden z-[60]"
+            className={cn(
+              "w-full overflow-hidden border-neutral-700/50",
+              inlineResults
+                ? // In flow: no viewport-anchored positioning, no own scroll —
+                  // the enclosing panel provides the single scrollbar.
+                  "mt-2 rounded-xl border bg-neutral-900/60"
+                : "absolute top-full mt-2 bg-neutral-900/95 backdrop-blur-xl border rounded-2xl shadow-2xl z-[60]"
+            )}
           >
-            {/* Mobile close button */}
+            {/* Mobile close button — on mobile blur never dismisses, so an
+                explicit close is the only way out (both modes). */}
             {isMobile && (
               <div className="sticky top-0 z-10 bg-neutral-900/95 backdrop-blur-xl border-b border-neutral-800/50">
                 <button
@@ -352,14 +365,21 @@ export function InlineSearch({ contextId }: InlineSearchProps = {}) {
 
             <div
               className={cn(
-                "overflow-y-auto scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-neutral-600/30 scrollbar-track-transparent hover:scrollbar-thumb-neutral-600/50 bg-neutral-900",
-                // vh cap is a fallback until the measured cap (below) kicks in
-                isMobile ? "max-h-[70vh]" : "max-h-[60vh]"
+                !inlineResults &&
+                  "overflow-y-auto scrollbar-thin scrollbar-thumb-rounded-md scrollbar-thumb-neutral-600/30 scrollbar-track-transparent hover:scrollbar-thumb-neutral-600/50 bg-neutral-900",
+                // vh cap is a fallback until the measured cap kicks in; inline
+                // mode lets the panel scroll instead so no cap is applied.
+                !inlineResults && (isMobile ? "max-h-[70vh]" : "max-h-[60vh]")
               )}
-              style={{ maxHeight: dropdownMaxH }}
+              style={inlineResults ? undefined : { maxHeight: dropdownMaxH }}
             >
               {isSearching || searchResults ? (
-                <SearchResults className="p-2" onTrackSelect={handleTrackSelection} contextId={contextId} />
+                <SearchResults
+                  className="p-2"
+                  onTrackSelect={handleTrackSelection}
+                  contextId={contextId}
+                  inline={inlineResults}
+                />
               ) : (
                 <div className="p-8 text-center">
                   <h3 className="text-lg font-medium text-white mb-2">Start typing to search</h3>
