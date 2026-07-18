@@ -360,9 +360,42 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
       }, 1500);
     });
 
+    // "Set default map view" — saves the current center + zoom as the room's
+    // default so everyone (and future joiners) opens to the party's location
+    // instead of the build default (#64). Same injection pattern as above.
+    const viewWrap = L.DomUtil.create("div", "", list as HTMLElement);
+    const viewBtn = L.DomUtil.create("button", "", viewWrap) as HTMLButtonElement;
+    viewBtn.type = "button";
+    viewBtn.textContent = "Set default map view";
+    viewBtn.title = "Save the current center + zoom as the room's default view for everyone";
+    viewBtn.style.cssText =
+      "display:block;width:100%;margin-top:4px;padding:4px 6px;font-size:11px;line-height:1.2;cursor:pointer;" +
+      "border:1px solid #ccc;border-radius:3px;background:#f4f4f4;color:#222;";
+    L.DomEvent.disableClickPropagation(viewWrap);
+    L.DomEvent.on(viewBtn, "click", (ev) => {
+      L.DomEvent.preventDefault(ev);
+      const map = mapRef.current;
+      const ws = useGlobalStore.getState().socket;
+      if (!map || !ws || ws.readyState !== WebSocket.OPEN) return;
+      const c = map.getCenter();
+      sendWSRequest({
+        ws,
+        request: {
+          type: ClientActionEnum.enum.SET_MAP_METADATA,
+          // MapMetadataSchema caps zoom at 22 (map allows up to 23 for placement).
+          metadata: { center: [c.lat, c.lng], zoom: Math.min(22, Math.round(map.getZoom())) },
+        },
+      });
+      viewBtn.textContent = "✓ Saved for everyone";
+      setTimeout(() => {
+        viewBtn.textContent = "Set default map view";
+      }, 1500);
+    });
+
     return () => {
       separator.remove();
       wrap.remove();
+      viewWrap.remove();
     };
   }, [canMutate]);
 
@@ -486,34 +519,62 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     };
   }, [canMutate, myClientId]);
 
-  // Re-center when mapMetadata changes (curator hit "Set map view"). The ref
-  // seeds with the metadata present at mount so the effect's initial run is a
-  // no-op — otherwise every remount (mobile Map panel toggled off/on) would
-  // snap the view back to the room default, discarding the restored lastView.
+  // Re-center when the room default view changes (admin hit "Set default map
+  // view", #64) — but only for NON-GPS users. A GPS user is anchored to their
+  // own location (#66/#74); the room default orients initial-load and manual
+  // users, and shouldn't yank someone away from where they physically are.
+  //
+  // appliedMetadataRef seeds with the metadata present at mount so the effect's
+  // initial run is a no-op — otherwise every remount (mobile Map panel toggled
+  // off/on) would snap the view back to the room default, discarding the
+  // restored lastView (#117).
   const appliedMetadataRef = useRef(mapMetadata);
   useEffect(() => {
     if (mapMetadata === appliedMetadataRef.current) return;
     appliedMetadataRef.current = mapMetadata;
-    if (mapRef.current && mapMetadata) {
-      mapRef.current.setView(mapMetadata.center, mapMetadata.zoom);
-    }
+    if (!mapRef.current || !mapMetadata) return;
+    if (useMapStore.getState().locationMode === "gps") return;
+    mapRef.current.setView(mapMetadata.center, mapMetadata.zoom);
   }, [mapMetadata]);
 
-  // Center on the user's own position when requested (#66 GPS-switch, #67 button).
-  // Waits until a position is actually available — arming the request before the
-  // first GPS fix lands is fine; this fires as soon as ownPosition appears.
+  // Center on the user's own position when requested (#66 GPS-switch, #67 button,
+  // and #74's default-to-GPS-on-load). Waits until a position is actually
+  // available — arming the request before the first GPS fix lands is fine; this
+  // fires as soon as ownPosition appears.
   useEffect(() => {
     const map = mapRef.current;
     if (!pendingRecenter || !map || !ownPosition) return;
-    // Two MapCanvas instances are mounted at once (desktop + mobile layouts;
-    // the inactive one is display:none, so its map is 0×0). flyTo on a
-    // zero-size map divides by zero in Leaflet's flight math and throws
-    // "Invalid LatLng (NaN, NaN)", crashing the app. Skip without consuming
-    // so the visible instance handles the recenter instead.
-    const size = map.getSize();
-    if (size.x === 0 || size.y === 0) return;
-    map.flyTo([ownPosition.lat, ownPosition.lng], Math.max(map.getZoom(), 18), { duration: 0.6 });
-    useMapStore.getState().consumeRecenter();
+
+    let raf = 0;
+    let tries = 0;
+    const attempt = () => {
+      const m = mapRef.current;
+      if (!m) return;
+      // Two MapCanvas instances are mounted at once (desktop + mobile layouts;
+      // the inactive one is display:none, so its map is 0×0). flyTo on a
+      // zero-size map divides by zero in Leaflet's flight math and throws
+      // "Invalid LatLng (NaN, NaN)", crashing the app.
+      //
+      // On load/refresh the VISIBLE map is also briefly 0×0 — the cached GPS
+      // fix (maximumAge) can land before layout. The old code returned without
+      // consuming, but the effect never re-ran once the map got sized, so the
+      // recenter was silently dropped (worked on the button / manual→GPS switch,
+      // never on initial load). Retry for a short window instead: the visible
+      // instance succeeds once laid out; the hidden one just times out. The
+      // consume below flips pendingRecenter → this effect's cleanup cancels any
+      // still-pending retry on the other instance.
+      const size = m.getSize();
+      if (size.x === 0 || size.y === 0) {
+        if (tries++ < 90) raf = requestAnimationFrame(attempt); // ~1.5s at 60fps
+        return;
+      }
+      m.flyTo([ownPosition.lat, ownPosition.lng], Math.max(m.getZoom(), 18), { duration: 0.6 });
+      useMapStore.getState().consumeRecenter();
+    };
+    attempt();
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [pendingRecenter, ownPosition]);
 
   // ── Sync shapes → Leaflet layers ────────────────────────────────
