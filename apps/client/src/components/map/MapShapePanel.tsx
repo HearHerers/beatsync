@@ -26,13 +26,14 @@ import {
 } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useLocalZonePlayback } from "@/hooks/useLocalZonePlayback";
 import { exportPlaylistToFile, parsePlaylistFile } from "@/lib/playlistFile";
 import { useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { useRoomStore } from "@/store/room";
 import { sendWSRequest } from "@/utils/ws";
 import { ClientActionEnum, MAIN_CONTEXT_ID, MAP_CONSTANTS, zoneDisplayName } from "@beatsync/shared";
-import { Download, Repeat, Trash2, Upload, X } from "lucide-react";
+import { Download, Loader2, Repeat, Trash2, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { RoomPoolList } from "./RoomPoolList";
@@ -53,6 +54,17 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
   const [poolClearOpen, setPoolClearOpen] = useState(false);
 
   const shape = selectedShapeId ? shapes.get(selectedShapeId) : undefined;
+
+  // What THIS device is doing with the selected zone's audio, vs what the
+  // server says. Server "playing" + local "loading" = download/decode still in
+  // flight (silent until it lands); "idle" = culled or failed.
+  const localStates = useLocalZonePlayback();
+  const serverIsPlaying = playlist?.playbackState.type === "playing";
+  const localInfo = shape ? localStates.get(shape.id) : undefined;
+  const localState = localInfo?.state ?? "idle";
+  const localLoadPct = localInfo?.totalBytes
+    ? Math.min(100, Math.round(((localInfo.loadedBytes ?? 0) / localInfo.totalBytes) * 100))
+    : null;
 
   // Local slider value (uncontrolled wrt server). Snaps to the shape's server-
   // side falloff when the selection changes or the server pushes an update;
@@ -151,7 +163,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
 
       <TabsContent value="zone" className="flex min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
         {shape ? (
-          <ZoneTab />
+          ZoneTab()
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-xs text-neutral-500">
             <div>
@@ -252,8 +264,14 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
   );
 
   // The zone playlist view — only rendered with a shape selected. A nested
-  // component (not early returns) so the Tabs skeleton always mounts and the
-  // pool tab stays reachable with nothing selected.
+  // render helper (not early returns) so the Tabs skeleton always mounts and
+  // the pool tab stays reachable with nothing selected. Invoked as {ZoneTab()}
+  // — a plain call, NOT <ZoneTab /> — because a function declared per-render
+  // gets a new identity each time; as a JSX component that reads as a brand-new
+  // component type, so React would remount the whole subtree on every parent
+  // re-render (replaying every queue row's entrance animation — visible
+  // strobing while load progress polls). A plain call adds no component
+  // boundary, so the subtree reconciles in place. No hooks may be used here.
   function ZoneTab() {
     if (!shape) return null;
     return (
@@ -262,7 +280,20 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
         <div className="flex items-center justify-between gap-2 border-b border-neutral-800/50 px-4 py-3">
           <div className="min-w-0 flex-1">
             <ShapeNameEditor shape={shape} canMutate={canMutate} send={send} />
-            <div className="text-[11px] text-neutral-500">{shape.type}</div>
+            <div className="flex items-center gap-2 text-[11px] text-neutral-500">
+              <span>{shape.type}</span>
+              {/* Local load/playback status. "loading" also shows for preloads
+                  of zones that aren't playing yet — sound is being fetched
+                  either way. */}
+              {localState === "loading" && (
+                <span className="flex items-center gap-1 text-amber-400/90">
+                  <Loader2 className="size-3 animate-spin" />
+                  loading audio{localLoadPct != null && `… ${localLoadPct}%`}
+                </span>
+              )}
+              {serverIsPlaying && localState === "playing" && <span className="text-green-500">playing here</span>}
+              {serverIsPlaying && localState === "idle" && <span>not audible here</span>}
+            </div>
           </div>
           {canMutate && (
             <div className="flex items-center gap-1">
