@@ -163,7 +163,7 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
 
       <TabsContent value="zone" className="flex min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
         {shape ? (
-          <ZoneTab />
+          ZoneTab()
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-xs text-neutral-500">
             <div>
@@ -264,8 +264,14 @@ export const MapShapePanel = ({ canMutate }: MapShapePanelProps) => {
   );
 
   // The zone playlist view — only rendered with a shape selected. A nested
-  // component (not early returns) so the Tabs skeleton always mounts and the
-  // pool tab stays reachable with nothing selected.
+  // render helper (not early returns) so the Tabs skeleton always mounts and
+  // the pool tab stays reachable with nothing selected. Invoked as {ZoneTab()}
+  // — a plain call, NOT <ZoneTab /> — because a function declared per-render
+  // gets a new identity each time; as a JSX component that reads as a brand-new
+  // component type, so React would remount the whole subtree on every parent
+  // re-render (replaying every queue row's entrance animation — visible
+  // strobing while load progress polls). A plain call adds no component
+  // boundary, so the subtree reconciles in place. No hooks may be used here.
   function ZoneTab() {
     if (!shape) return null;
     return (

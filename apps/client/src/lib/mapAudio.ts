@@ -82,6 +82,13 @@ async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
     return;
   }
 
+  // Same URL already downloading — don't start a second fetch. The cull/resume
+  // effect re-fires playShape on every GPS tick while a zone is still loading,
+  // and duplicate downloads race each other's onProgress writes (the progress
+  // % visibly runs backwards) besides wasting the bandwidth we're waiting on.
+  // The in-flight load's completion handles pendingPlay + notifyLoaded.
+  if (chain.requestedUrl === url && chain.bufferPromise) return;
+
   const decode = downloadBufferFromURL({
     url,
     // Feed the load-status UI (bottom bar / zone header). On slow connections
