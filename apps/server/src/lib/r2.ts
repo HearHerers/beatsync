@@ -146,9 +146,23 @@ export async function validateAudioFileExists(audioUrl: string): Promise<boolean
 
     await r2Client.send(command);
     return true; // File exists
-  } catch {
-    console.error(`Error validating audio file ${audioUrl}:`);
-    return false;
+  } catch (err) {
+    // Only DROP a track when the object is DEFINITIVELY absent (404/NotFound).
+    // Any other failure — 403, network, timeout, endpoint/credential/path-style
+    // misconfig — is inconclusive: KEEP the track rather than silently delete a
+    // room's audio over a check we couldn't complete. A false "gone" here gets
+    // baked in by the next periodic backup = permanent loss. (Same spirit as the
+    // #124 restore guard; that only covers a thrown restore, not per-track
+    // validation drops.) The old bare catch logged nothing AND dropped — so a
+    // misconfigured S3 endpoint quietly emptied every restored room.
+    const status = (err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+    const name = (err as { name?: string })?.name;
+    if (status === 404 || name === "NotFound" || name === "NoSuchKey") {
+      console.warn(`Audio object missing in bucket — dropping on restore: ${audioUrl}`);
+      return false;
+    }
+    console.error(`Could not validate audio file (keeping it — inconclusive check): ${audioUrl}`, err);
+    return true;
   }
 }
 
