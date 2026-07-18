@@ -286,7 +286,15 @@ function playShape(
   const ctx = audioContextManager.getContext();
   const source = audioContextManager.createBufferSource();
   source.buffer = chain.buffer;
-  source.loop = true; // shape.loop is enforced server-side; default true matches map UX
+  // Zone loop semantics (#99): "loop" loops the whole PLAYLIST, not one song.
+  //  - A single-track looping zone loops the buffer seamlessly (gapless) — no
+  //    advance needed, so keep source.loop = true.
+  //  - A multi-track zone (or a non-looping zone) plays each track once and
+  //    advances via the onended handler below (wrapping to the top iff loop).
+  const playlistNow = useGlobalStore.getState().playlists.get(shapeId);
+  const trackCount = playlistNow?.tracks.length ?? 1;
+  const zoneLoops = playlistNow?.loop ?? false;
+  source.loop = trackCount <= 1 && zoneLoops;
   source.playbackRate.value = playbackRate;
   source.connect(chain.proximityGain);
 
@@ -353,6 +361,11 @@ function playShape(
     }
   }
   chain.sourceNode = source;
+  // Non-seamless sources advance the playlist when they finish (#99). Seamless
+  // single-track loops (source.loop === true) never end, so no handler.
+  if (!source.loop) {
+    source.onended = () => advanceZonePlaylist(shapeId, source);
+  }
   chain.lastSchedule = {
     startedAtCtxTime: startAt,
     startedAtOffset: offset,
@@ -364,6 +377,50 @@ function playShape(
     outputLatencyMs,
     isSynced: state.isSynced,
   };
+}
+
+/**
+ * A zone track finished playing — advance to the next track in the zone's
+ * playlist (#99). Wraps to the top only if the zone's loop flag is set; a
+ * non-looping zone stops at the end of its playlist.
+ *
+ * Every in-range client runs this at ~the same instant (they all started the
+ * track at the same server time), so they all broadcast the next PLAY. The
+ * server collapses the duplicate requests (last-write-wins in the play batch),
+ * exactly like the audio room's onended → skipToNextTrack → broadcastPlay path.
+ * Clients that are range-culled tore their source down (no onended), so a zone
+ * only advances while at least one listener is near it.
+ */
+function advanceZonePlaylist(shapeId: string, endedSource: AudioBufferSourceNode): void {
+  const chain = chains.get(shapeId);
+  // Only a natural end leaves this as the live source. A manual stop, pause, or
+  // track switch reassigns chain.sourceNode first, so bail in those cases.
+  if (!chain || chain.sourceNode !== endedSource) return;
+
+  const state = useGlobalStore.getState();
+  const playlist = state.playlists.get(shapeId);
+  if (!playlist || playlist.tracks.length === 0) return;
+
+  const idx = playlist.tracks.findIndex((t) => t.url === chain.url);
+  let nextIdx = idx + 1;
+  if (nextIdx >= playlist.tracks.length) {
+    if (!playlist.loop) return; // end of a non-looping playlist → stop
+    nextIdx = 0;
+  }
+  const nextUrl = playlist.tracks[nextIdx]?.url;
+  if (!nextUrl) return;
+
+  const ws = state.socket;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  sendWSRequest({
+    ws,
+    request: {
+      type: ClientActionEnum.enum.PLAY,
+      contextId: shapeId,
+      audioSource: nextUrl,
+      trackTimeSeconds: 0,
+    },
+  });
 }
 
 function pauseShape(shapeId: string): void {
