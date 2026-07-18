@@ -10,18 +10,24 @@
 //                                       it prints what would be deleted and exits.
 //   bun run rooms:purge --yes         — HARD delete EVERY room (state + all R2
 //                                       audio, including orphans). Irreversible.
+//   bun run room:duplicate <roomId> [newId] — structure-only copy (type, map
+//                                       config, shapes, name) into newId (random
+//                                       6-digit id when omitted). No playlists/
+//                                       audio, no chat; first joiner of the copy
+//                                       mints a fresh admin token.
 //
 // Requires OPERATOR_SECRET in .env and the server running (SERVER_URL to
 // override http://localhost:8080).
 
 import { loadLatestBackup, operatorRequest, summarizeRoom } from "./lib/backupSnapshot";
 
-const USAGE = "Usage: bun run scripts/room-manage.ts <archive|unarchive|delete> <roomId> [--yes] | purge [--yes]";
+const USAGE =
+  "Usage: bun run scripts/room-manage.ts <archive|unarchive|delete> <roomId> [--yes] | duplicate <roomId> [newId] | purge [--yes]";
 
 async function main() {
   const args = process.argv.slice(2);
   const yes = args.includes("--yes");
-  const [action, roomId] = args.filter((a) => !a.startsWith("--"));
+  const [action, roomId, targetId] = args.filter((a) => !a.startsWith("--"));
 
   if (action === "purge") {
     if (!yes) {
@@ -44,9 +50,16 @@ async function main() {
     return;
   }
 
-  if (!roomId || !action || !["archive", "unarchive", "delete"].includes(action)) {
+  if (!roomId || !action || !["archive", "unarchive", "delete", "duplicate"].includes(action)) {
     console.error(USAGE);
     process.exit(1);
+  }
+
+  if (action === "duplicate") {
+    const path = `/admin/rooms/${roomId}/duplicate${targetId ? `?to=${encodeURIComponent(targetId)}` : ""}`;
+    const result = await operatorRequest(path, "POST");
+    console.log(`duplicate ok: ${JSON.stringify(result)}`);
+    return;
   }
 
   if (action === "delete" && !yes) {

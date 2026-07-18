@@ -29,6 +29,7 @@ bun run room:info <id>   # Room detail: zones, playlists, clients (offline)
 bun run room:archive <id>    # Soft delete: evict + hide + reject joins; reversible
 bun run room:unarchive <id>  # Reverse an archive
 bun run room:delete <id> --yes  # HARD delete: purge state + R2 audio, tombstoned
+bun run room:duplicate <id> [newId]  # Structure-only copy (type, map config, shapes, name) into a new room; no playlists/audio/chat, fresh admin token on first join
 bun run rooms:purge --yes    # HARD delete EVERY room + all audio (incl. orphans)
 bun run room:import <roomId> <dir>  # Bulk-import local audio files into a room via the running server (--context <shapeId> for a zone, --dry-run to preview). For <shapeId> use a zone id from `bun run room:info <roomId>`.
 # The mutations call the running server's /admin API (OPERATOR_SECRET bearer).

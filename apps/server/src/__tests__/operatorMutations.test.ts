@@ -2,6 +2,8 @@
 // rejection, and — the critical property — deletes that stay deleted across a
 // restore (tombstones), while re-created rooms restore normally.
 
+import type { ShapeType } from "@beatsync/shared";
+import { INITIAL_PLAYLIST_PLAYBACK_STATE, MAIN_CONTEXT_ID } from "@beatsync/shared";
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mockR2 } from "./mocks/r2";
 import { createMockWs } from "./mocks/websocket";
@@ -174,6 +176,71 @@ describe("operator archive / delete", () => {
     const backupKey = Object.keys(store).find((k) => k.startsWith("state-backup/"))!;
     const backup = store[backupKey] as { data: { rooms: Record<string, unknown> } };
     expect(Object.keys(backup.data.rooms)).toHaveLength(0);
+  });
+
+  it("duplicate copies structure (type, shapes, name) but not playlists or admin token, and backs up", async () => {
+    const shape: ShapeType = {
+      id: "zone-1",
+      type: "polygon",
+      coordinates: [
+        [
+          [42.28, -83.74],
+          [42.281, -83.74],
+          [42.281, -83.741],
+        ],
+      ],
+      createdBy: "creator-client",
+      createdAt: Date.now(),
+      groupId: null,
+      falloffMeters: 25,
+    };
+    const source = globalManager.getOrCreateRoom("100020");
+    source.restoreMapState({ roomType: "map", shapes: [shape] });
+    source.setRoomName("Template Room");
+    source.restoreAdminToken("secret-token");
+    source.restorePlaylists([
+      {
+        id: MAIN_CONTEXT_ID,
+        tracks: [{ url: "https://r2.example/room-100020/a.mp3" }],
+        loop: false,
+        playbackState: { ...INITIAL_PLAYLIST_PLAYBACK_STATE },
+      },
+    ]);
+
+    const res = await handleAdmin(...adminReq("/admin/rooms/100020/duplicate?to=100021", "POST"));
+    expect(res.status).toBe(200);
+    expect((await res.json()) as object).toMatchObject({
+      ok: true,
+      roomId: "100021",
+      sourceRoomId: "100020",
+      shapes: 1,
+    });
+
+    const copy = globalManager.getRoom("100021")!;
+    expect(copy.isMapRoom()).toBe(true);
+    expect(copy.getRoomName()).toBe("Template Room");
+    const copyBackup = copy.createBackup();
+    expect(copyBackup.shapes).toEqual([shape]);
+    // Every room is constructed with an empty main context; the source's track
+    // must not have come along.
+    expect(copyBackup.playlists.flatMap((p) => p.tracks)).toHaveLength(0);
+    expect(copyBackup.adminToken).toBeUndefined();
+
+    // Deep copy: mutating the source's shape must not leak into the duplicate.
+    shape.falloffMeters = 99;
+    expect(copy.createBackup().shapes![0].falloffMeters).toBe(25);
+
+    // The post-duplicate backup already lists the new room.
+    const backupKey = Object.keys(store)
+      .filter((k) => k.startsWith("state-backup/"))
+      .sort()
+      .at(-1)!;
+    const backup = store[backupKey] as { data: { rooms: Record<string, unknown> } };
+    expect(backup.data.rooms["100021"]).toBeDefined();
+
+    // Target collisions and missing sources are rejected.
+    expect((await handleAdmin(...adminReq("/admin/rooms/100020/duplicate?to=100021", "POST"))).status).toBe(409);
+    expect((await handleAdmin(...adminReq("/admin/rooms/999999/duplicate", "POST"))).status).toBe(404);
   });
 
   it("restore preserves the archived flag", async () => {

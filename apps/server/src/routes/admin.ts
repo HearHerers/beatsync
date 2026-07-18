@@ -134,7 +134,7 @@ export async function handleAdmin(req: Request, url: URL, server?: BunServer): P
 
   // /admin/rooms/:id[/action] — room ids are simple tokens (6-digit codes);
   // reject anything path-unsafe rather than trying to be clever.
-  const roomMatch = /^\/admin\/rooms\/([A-Za-z0-9_-]+)(?:\/(archive|unarchive))?$/.exec(url.pathname);
+  const roomMatch = /^\/admin\/rooms\/([A-Za-z0-9_-]+)(?:\/(archive|unarchive|duplicate))?$/.exec(url.pathname);
   if (!roomMatch) return invisible();
   const [, roomId, action] = roomMatch;
   const room = globalManager.getRoom(roomId);
@@ -157,6 +157,45 @@ export async function handleAdmin(req: Request, url: URL, server?: BunServer): P
     await backupNow();
     console.log(`🛠️ Operator deleted room ${roomId}${room ? "" : " (was not resident)"}`);
     return json({ ok: true, roomId, deleted: true, wasResident: Boolean(room) });
+  }
+
+  // Duplicate: structure-only copy — room type, map metadata, tile layer,
+  // shapes, and name. Deliberately NO playlists (audio objects aren't copied,
+  // so track URLs would dangle on source delete), NO chat, NO admin token (the
+  // copy is a brand-new room; its first joiner mints a fresh token).
+  if (req.method === "POST" && action === "duplicate") {
+    if (!room) return json({ ok: false, error: `Room ${roomId} not found` }, 404);
+    const requestedId = url.searchParams.get("to");
+    if (requestedId && !/^[A-Za-z0-9_-]+$/.test(requestedId)) {
+      return json({ ok: false, error: `Invalid target room id ${requestedId}` }, 400);
+    }
+    let newId = requestedId;
+    if (newId) {
+      if (globalManager.getRoom(newId)) return json({ ok: false, error: `Room ${newId} already exists` }, 409);
+    } else {
+      do {
+        newId = String(Math.floor(100000 + Math.random() * 900000));
+      } while (globalManager.getRoom(newId));
+    }
+
+    const source = room.createBackup();
+    const copy = globalManager.getOrCreateRoom(newId);
+    if (source.roomName) copy.setRoomName(source.roomName);
+    // structuredClone: createBackup returns live references (shapes, metadata);
+    // without it, editing a shape in one room would mutate the other.
+    copy.restoreMapState(
+      structuredClone({
+        roomType: source.roomType,
+        mapMetadata: source.mapMetadata,
+        defaultTileLayerId: source.defaultTileLayerId,
+        shapes: source.shapes,
+      })
+    );
+    await backupNow();
+    console.log(
+      `🛠️ Operator duplicated room ${roomId} -> ${newId} (${source.shapes?.length ?? 0} shape(s), structure only)`
+    );
+    return json({ ok: true, roomId: newId, sourceRoomId: roomId, shapes: source.shapes?.length ?? 0 });
   }
 
   if (req.method === "POST" && (action === "archive" || action === "unarchive")) {
