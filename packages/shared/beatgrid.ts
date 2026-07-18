@@ -116,6 +116,61 @@ export const DURATION_VERIFY_TOLERANCE_SEC = 3;
  */
 export const DURATION_FALLBACK_TOLERANCE_SEC = 1.5;
 
+/**
+ * When several candidates share a match key (a collection holding two rips of
+ * the same track), the real duration picks one only if it is closer than the
+ * runner-up by at least this margin — export durations are whole seconds, so
+ * anything under half a second can't discriminate honestly.
+ */
+export const DURATION_TIEBREAK_MARGIN_SEC = 0.5;
+
+/**
+ * Whether two grids are interchangeable for beat-sync: same tempo (±0.05 BPM),
+ * same downbeat anchor (±20 ms — beyond that, two "synced" tracks read as a
+ * flam), same meter. Used to treat two rips of the same audio as one entry.
+ */
+export function beatgridsEquivalent(
+  a: Pick<BeatgridType, "bpm" | "firstDownbeatSec" | "beatsPerBar">,
+  b: Pick<BeatgridType, "bpm" | "firstDownbeatSec" | "beatsPerBar">
+): boolean {
+  return (
+    Math.abs(a.bpm - b.bpm) <= 0.05 &&
+    Math.abs(a.firstDownbeatSec - b.firstDownbeatSec) <= 0.02 &&
+    a.beatsPerBar === b.beatsPerBar
+  );
+}
+
+/**
+ * Pick the one trustworthy entry out of several claiming the same match key
+ * (or surviving the fallback window), or undefined when none can be trusted:
+ *   1. a single candidate wins outright;
+ *   2. candidates whose grids are all equivalent are the same audio ripped
+ *      more than once — any of them works, take the first;
+ *   3. genuinely different versions resolve by the real duration, but only
+ *      when every candidate has an export duration and the closest one beats
+ *      the runner-up by DURATION_TIEBREAK_MARGIN_SEC.
+ */
+export function resolveBeatgridCandidates(
+  candidates: BeatgridExportTrackType[],
+  durationSec?: number
+): BeatgridExportTrackType | undefined {
+  if (candidates.length === 0) return undefined;
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.every((c) => beatgridsEquivalent(c, candidates[0]))) return candidates[0];
+  if (durationSec !== undefined) {
+    const scored = candidates
+      .filter((c) => c.durationSec !== undefined)
+      .map((c) => ({ c, diff: Math.abs((c.durationSec as number) - durationSec) }))
+      .sort((x, y) => x.diff - y.diff);
+    // Refuse unless duration can rank EVERY candidate — an unscored entry
+    // could be the right one.
+    if (scored.length === candidates.length && scored[0].diff + DURATION_TIEBREAK_MARGIN_SEC <= scored[1].diff) {
+      return scored[0].c;
+    }
+  }
+  return undefined;
+}
+
 // ── Loose title matching (fallback tier only) ───────────────────────
 
 /**
@@ -169,26 +224,32 @@ export function entryKeys(track: BeatgridExportTrackType): string[] {
 // ── Inverted key map (server BeatgridIndex) ─────────────────────────
 
 export interface BeatgridKeyMapResult {
-  /** Normalized key → the single export entry that owns it. */
-  byKey: Map<string, BeatgridExportTrackType>;
+  /**
+   * Normalized key → every export entry that claims it. Most keys have one
+   * owner; multi-owner keys (a collection holding two rips of the same
+   * track) are kept for lookup-time resolution via
+   * resolveBeatgridCandidates rather than discarded outright.
+   */
+  byKey: Map<string, BeatgridExportTrackType[]>;
   /** Constant-grid entries indexed. */
   tracks: number;
   /** Entries skipped because their grid is dynamic (unsupported in v1). */
   skippedDynamic: number;
-  /** Keys discarded because more than one entry claimed them. */
+  /** Keys claimed by more than one entry (resolved at lookup time). */
   ambiguousKeys: number;
 }
 
 /**
- * Build the per-track lookup for an export document: every unambiguous key of
- * every constant-grid entry, keys claimed by >1 entry discarded. This is the
- * index-shaped counterpart of matchBeatgridsToTracks — same keys, same
- * ambiguity safety, no per-import claiming (a key resolves to the same entry
- * however many times it is looked up).
+ * Build the per-track lookup for an export document: every key of every
+ * constant-grid entry, with multi-owner keys kept as candidate lists. This is
+ * the index-shaped counterpart of matchBeatgridsToTracks — same keys, no
+ * per-import claiming (a key resolves the same way however many times it is
+ * looked up) — but where the batch matcher discards shared keys, the index
+ * defers to resolveBeatgridCandidates, which can settle them with grid
+ * equivalence or the track's real duration.
  */
 export function buildBeatgridKeyMap(doc: BeatgridExportType): BeatgridKeyMapResult {
-  // null marks a key that has been claimed twice and can identify neither entry.
-  const owners = new Map<string, BeatgridExportTrackType | null>();
+  const byKey = new Map<string, BeatgridExportTrackType[]>();
   let tracks = 0;
   let skippedDynamic = 0;
   for (const track of doc.tracks) {
@@ -198,14 +259,14 @@ export function buildBeatgridKeyMap(doc: BeatgridExportType): BeatgridKeyMapResu
     }
     tracks++;
     for (const key of new Set(entryKeys(track))) {
-      owners.set(key, owners.has(key) ? null : track);
+      const list = byKey.get(key);
+      if (list) list.push(track);
+      else byKey.set(key, [track]);
     }
   }
-  const byKey = new Map<string, BeatgridExportTrackType>();
   let ambiguousKeys = 0;
-  for (const [key, owner] of owners) {
-    if (owner === null) ambiguousKeys++;
-    else byKey.set(key, owner);
+  for (const list of byKey.values()) {
+    if (list.length > 1) ambiguousKeys++;
   }
   return { byKey, tracks, skippedDynamic, ambiguousKeys };
 }
