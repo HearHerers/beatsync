@@ -28,12 +28,22 @@ export class BackupManager {
   private static readonly BACKUP_PREFIX = "state-backup/";
   private static readonly DEFAULT_RESTORE_CONCURRENCY = 1000;
 
+  /** Set true when restoreState() hits a HARD failure (couldn't download/parse
+   *  the backup envelope). Callers (index.ts) must then refuse to start the
+   *  periodic backup loop — backing up the resulting empty state would overwrite
+   *  and prune the good backups we failed to read (#124/1). NOT set when there's
+   *  simply no backup (fresh server) or when individual rooms fail. */
+  static lastRestoreFailed = false;
+
   /**
    * Restore a single room from backup data
    */
   private static async restoreRoom(roomId: string, roomData: RoomBackupType): Promise<RoomRestoreResult> {
     try {
       const room = globalManager.getOrCreateRoom(roomId);
+
+      // `playlists` is guaranteed by RoomBackupSchema (legacy audioSources-only
+      // backups are migrated to a main-context playlist in the schema preprocess).
 
       // Concurrently validate every track URL in every playlist (no limit on
       // concurrency — R2 HEAD calls are cheap and parallelizable).
@@ -161,6 +171,7 @@ export class BackupManager {
    * Restore server state from the latest backup in R2
    */
   static async restoreState(): Promise<boolean> {
+    this.lastRestoreFailed = false;
     try {
       console.log("🔍 Looking for state backups...");
 
@@ -264,6 +275,9 @@ export class BackupManager {
       return true;
     } catch (error) {
       console.error("❌ State restore failed:", error);
+      // Hard failure: we could not read/parse the backup at all. Flag it so the
+      // caller skips periodic backups and doesn't clobber the good copies (#124/1).
+      this.lastRestoreFailed = true;
       return false;
     }
   }

@@ -85,7 +85,7 @@ const PlaylistBackupSchema = z.object({
   playbackState: PlaylistPlaybackStateSchema,
 });
 
-const RoomBackupSchema = z.object({
+const RoomBackupCoreSchema = z.object({
   clientDatas: z.array(ClientDataSchema),
   globalVolume: z.number().min(0).max(1).default(1.0),
   lowPassFreq: z
@@ -99,7 +99,9 @@ const RoomBackupSchema = z.object({
       nextMessageId: z.number(),
     })
     .optional(),
-  /** Per-context playlist state — single source of truth for room audio. */
+  /** Per-context playlist state — single source of truth for room audio. Always
+   *  present after parse: legacy backups without it are migrated by the
+   *  preprocess below, so consumers can treat it as required. */
   playlists: z.array(PlaylistBackupSchema),
   /** Display name for the room, set by an admin. Audio rooms and map rooms both
    *  use it — UI falls back to "Room <id>" when unset. */
@@ -114,6 +116,41 @@ const RoomBackupSchema = z.object({
   /** Operator soft-delete: hidden from discovery, joins rejected, R2 audio kept. */
   archived: z.boolean().optional(),
 });
+
+/**
+ * Room backup with a backward-compat migration (#124/1). Pre-playlists backups
+ * have no `playlists` and instead carry top-level `audioSources`/`playbackState`.
+ * Fold those into a single main-context playlist BEFORE validation, so an old
+ * room parses cleanly instead of failing the whole-document parse — which made
+ * the server boot with ZERO rooms and then let the periodic backup overwrite +
+ * prune the good copies. Because migration happens pre-validation, the parsed
+ * type keeps `playlists` required.
+ */
+const RoomBackupSchema = z.preprocess((raw) => {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const r = raw as Record<string, unknown>;
+    if (r.playlists === undefined && Array.isArray(r.audioSources)) {
+      return {
+        ...r,
+        playlists: [
+          {
+            id: MAIN_CONTEXT_ID,
+            tracks: r.audioSources,
+            loop: false,
+            playbackState: r.playbackState ?? {
+              type: "paused",
+              audioSource: "",
+              trackIndex: 0,
+              serverTimeToExecute: 0,
+              trackPositionSeconds: 0,
+            },
+          },
+        ],
+      };
+    }
+  }
+  return raw;
+}, RoomBackupCoreSchema);
 export type RoomBackupType = z.infer<typeof RoomBackupSchema>;
 
 export const ServerBackupSchema = z.object({
@@ -872,12 +909,26 @@ export class RoomManager {
     }
 
     // Check every pending audio-load gate (one per context) for this client.
-    // If the departing client's absence unblocks any gate, fire its play now.
+    // If the departing client's absence unblocks any gate, advance it — routing
+    // through the batch coordinator when the context belongs to an in-flight
+    // PLAY_ALL batch, exactly like processClientLoadedAudioSource. Firing
+    // executeScheduledPlay directly here (the old behavior) de-phased the zone
+    // from its batch AND left it in pendingBatch.waitingOn/playActions, so the
+    // batch timeout later re-broadcast a second, conflicting PLAY for it (#124/3).
     for (const [contextId, playlist] of this.playlists.entries()) {
       const pending = playlist.pendingPlay;
       if (!pending) continue;
       pending.clientsLoaded.delete(clientId);
-      if (this.allClientsLoadedPendingSource(contextId)) {
+      if (!this.allClientsLoadedPendingSource(contextId)) continue;
+
+      if (this.pendingBatch?.waitingOn.has(contextId)) {
+        console.log(`Client left during loading on ctx=${contextId} (batched). Awaiting siblings.`);
+        this.pendingBatch.waitingOn.delete(contextId);
+        this.clearAudioLoadingState(contextId);
+        if (this.pendingBatch.waitingOn.size === 0) {
+          this.flushBatch(pending.server);
+        }
+      } else {
         console.log(`Client left during loading on ctx=${contextId}. All remaining clients loaded. Starting playback.`);
         this.executeScheduledPlay(pending.server, contextId);
       }
