@@ -20,7 +20,12 @@ function statesEqual(a: Map<string, ZoneLoadInfo>, b: Map<string, ZoneLoadInfo>)
   for (const [id, info] of a) {
     const other = b.get(id);
     if (!other) return false;
-    if (other.state !== info.state || other.loadedBytes !== info.loadedBytes || other.totalBytes !== info.totalBytes) {
+    if (
+      other.state !== info.state ||
+      other.loadedBytes !== info.loadedBytes ||
+      other.totalBytes !== info.totalBytes ||
+      other.bufferedUrl !== info.bufferedUrl
+    ) {
       return false;
     }
   }
