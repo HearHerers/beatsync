@@ -11,8 +11,17 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { R2_AUDIO_FILE_NAME_DELIMITER, sanitizeDisplayName } from "@beatsync/shared";
 import { config } from "dotenv";
+import pLimit from "p-limit";
 
 config();
+
+// Cap concurrent HEAD/validation requests. On restore, BackupManager fires
+// validateAudioFileExists for EVERY track in EVERY room via unbounded
+// Promise.all across up to 1000 rooms — thousands of simultaneous HEADs. Cloud
+// R2 scales to that, but a self-hosted S3/MinIO behind a proxy gets flooded and
+// starts timing out / resetting connections, which then read as "file gone".
+// A shared limiter keeps validation reliable regardless of provider.
+const headValidationLimit = pLimit(16);
 
 const S3_CONFIG = {
   BUCKET_NAME: process.env.S3_BUCKET_NAME!,
@@ -125,45 +134,46 @@ export async function validateAudioFileExists(audioUrl: string): Promise<boolean
     return true;
   }
 
-  try {
-    // Derive the object key relative to PUBLIC_URL. Must be bucket-aware:
-    // path-style PUBLIC_URLs (https://host/bucket) fold the bucket into the
-    // URL path, and using the raw pathname as the key (the old
-    // extractKeyFromUrl behavior) 404s every HEAD — which made restore drop
-    // every uploaded track on server restart.
-    const key = keyFromPublicUrl(audioUrl);
-
-    if (!key) {
-      console.error(`Could not extract key from URL: ${audioUrl}`);
-      return false;
-    }
-
-    // Perform HEAD request to check if object exists
-    const command = new HeadObjectCommand({
-      Bucket: S3_CONFIG.BUCKET_NAME,
-      Key: key,
-    });
-
-    await r2Client.send(command);
-    return true; // File exists
-  } catch (err) {
-    // Only DROP a track when the object is DEFINITIVELY absent (404/NotFound).
-    // Any other failure — 403, network, timeout, endpoint/credential/path-style
-    // misconfig — is inconclusive: KEEP the track rather than silently delete a
-    // room's audio over a check we couldn't complete. A false "gone" here gets
-    // baked in by the next periodic backup = permanent loss. (Same spirit as the
-    // #124 restore guard; that only covers a thrown restore, not per-track
-    // validation drops.) The old bare catch logged nothing AND dropped — so a
-    // misconfigured S3 endpoint quietly emptied every restored room.
-    const status = (err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
-    const name = (err as { name?: string })?.name;
-    if (status === 404 || name === "NotFound" || name === "NoSuchKey") {
-      console.warn(`Audio object missing in bucket — dropping on restore: ${audioUrl}`);
-      return false;
-    }
-    console.error(`Could not validate audio file (keeping it — inconclusive check): ${audioUrl}`, err);
-    return true;
+  // Derive the object key relative to PUBLIC_URL. Must be bucket-aware:
+  // path-style PUBLIC_URLs (https://host/bucket) fold the bucket into the
+  // URL path, and using the raw pathname as the key (the old
+  // extractKeyFromUrl behavior) 404s every HEAD — which made restore drop
+  // every uploaded track on server restart.
+  const key = keyFromPublicUrl(audioUrl);
+  if (!key) {
+    console.error(`Could not extract key from URL: ${audioUrl}`);
+    return false;
   }
+
+  // Rate-limited so a mass restore doesn't flood the S3 endpoint (see limiter above).
+  return headValidationLimit(async () => {
+    try {
+      const command = new HeadObjectCommand({
+        Bucket: S3_CONFIG.BUCKET_NAME,
+        Key: key,
+      });
+
+      await r2Client.send(command);
+      return true; // File exists
+    } catch (err) {
+      // Only DROP a track when the object is DEFINITIVELY absent (404/NotFound).
+      // Any other failure — 403, network, timeout, endpoint/credential/path-style
+      // misconfig — is inconclusive: KEEP the track rather than silently delete a
+      // room's audio over a check we couldn't complete. A false "gone" here gets
+      // baked in by the next periodic backup = permanent loss. (Same spirit as the
+      // #124 restore guard; that only covers a thrown restore, not per-track
+      // validation drops.) The old bare catch logged nothing AND dropped — so a
+      // misconfigured S3 endpoint quietly emptied every restored room.
+      const status = (err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+      const name = (err as { name?: string })?.name;
+      if (status === 404 || name === "NotFound" || name === "NoSuchKey") {
+        console.warn(`Audio object missing in bucket — dropping on restore: ${audioUrl}`);
+        return false;
+      }
+      console.error(`Could not validate audio file (keeping it — inconclusive check): ${audioUrl}`, err);
+      return true;
+    }
+  });
 }
 
 /**
