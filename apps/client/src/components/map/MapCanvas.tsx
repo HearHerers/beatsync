@@ -6,6 +6,7 @@
 // position updates) are sent via WebSocket using sendWSRequest.
 
 import { useClientId } from "@/hooks/useClientId";
+import { useLocalZonePlayback } from "@/hooks/useLocalZonePlayback";
 import { emojiForId } from "@/lib/avatarEmoji";
 import { getShapeCircle, getShapePolygonRing, outwardOffsetPolygonRing } from "@/lib/geo";
 import { useGlobalStore } from "@/store/global";
@@ -191,6 +192,8 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   const setOwnPosition = useMapStore((s) => s.setOwnPosition);
   const pendingRecenter = useMapStore((s) => s.pendingRecenter);
   const { clientId: myClientId } = useClientId();
+  // Per-zone local audio state — drives the amber "still downloading" tint.
+  const localStates = useLocalZonePlayback();
 
   // Keep Leaflet's internal size cache in sync with the container. Required
   // when the panel surrounding the map is resized or collapsed/expanded —
@@ -586,19 +589,24 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     }
   }, [shapes]);
 
-  // ── Highlight the selected shape ────────────────────────────────
+  // ── Highlight the selected shape + local load state ─────────────
+  // Color precedence: selected (yellow) > audio still loading on THIS device
+  // (amber) > default (green). Loading matches the amber used by the bottom-bar
+  // and zone-header indicators; the selected zone stays yellow because the side
+  // panel already shows its "loading audio… %" state.
   useEffect(() => {
     for (const [id, layer] of shapeLayersRef.current.entries()) {
       const isSelected = id === selectedShapeId;
+      const isLoading = localStates.get(id)?.state === "loading";
       if (layer instanceof L.Path) {
         layer.setStyle({
-          color: isSelected ? "#fde047" : "#22c55e",
+          color: isSelected ? "#fde047" : isLoading ? "#f59e0b" : "#22c55e",
           weight: isSelected ? 3 : 2,
-          fillOpacity: isSelected ? 0.25 : 0.15,
+          fillOpacity: isSelected ? 0.25 : isLoading ? 0.2 : 0.15,
         });
       }
     }
-  }, [selectedShapeId, shapes]);
+  }, [selectedShapeId, shapes, localStates]);
 
   // ── Falloff halos for every shape ───────────────────────────────
   // Visualizes each shape's audio falloff as a dashed outline at the falloff
