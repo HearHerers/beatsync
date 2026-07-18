@@ -10,7 +10,7 @@ import { extractFileNameFromUrl } from "@/lib/utils";
 import { computeScheduleTiming, downloadBufferFromURL, useGlobalStore } from "@/store/global";
 import { useMapStore } from "@/store/map";
 import { sendWSRequest } from "@/utils/ws";
-import { epochNow, ClientActionEnum, MAP_CONSTANTS } from "@beatsync/shared";
+import { epochNow, ClientActionEnum, MAIN_CONTEXT_ID, MAP_CONSTANTS } from "@beatsync/shared";
 import { toast } from "sonner";
 
 // Minimum lead time we want between calling source.start() and the audio thread
@@ -41,6 +41,10 @@ interface ShapeChain {
   bufferPromise?: Promise<AudioBuffer>; // in-flight decode for the current URL
   url?: string; // URL the CURRENT buffer was actually decoded from — set only once decode completes
   requestedUrl?: string; // latest URL asked for; leads `url` while a decode is in flight
+  // Live download progress (bytes) of the in-flight fetch. Present only while
+  // the response is streaming in and carried a content-length; sits at 100%
+  // through the decode phase, cleared when the load settles either way.
+  loadProgress?: { loaded: number; total: number };
   sourceNode?: AudioBufferSourceNode;
   proximityGain: GainNode; // 0..1 controlled by GPS distance
   // A play() that arrived before the buffer was ready (typical for late joiners who
@@ -95,10 +99,26 @@ async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
     return;
   }
 
+  // Same URL already downloading — don't start a second fetch. The cull/resume
+  // effect re-fires playShape on every GPS tick while a zone is still loading,
+  // and duplicate downloads race each other's onProgress writes (the progress
+  // % visibly runs backwards) besides wasting the bandwidth we're waiting on.
+  // The in-flight load's completion handles pendingPlay + notifyLoaded.
+  if (chain.requestedUrl === url && chain.bufferPromise) return;
+
   // One delayed retry absorbs transient download failures (flaky network,
   // storage hiccup); a second consecutive failure falls through to the catch
   // below and is surfaced instead of leaving the zone silently "playing".
-  const attemptDownload = () => downloadBufferFromURL({ url }).then((r) => r.audioBuffer);
+  // onProgress feeds the load-status UI (bottom bar / zone header) — on slow
+  // connections the download IS the wait, so surface how far along it is. A
+  // retry's progress restarts from 0, which is honest.
+  const attemptDownload = () =>
+    downloadBufferFromURL({
+      url,
+      onProgress: (loaded, total) => {
+        chain.loadProgress = { loaded, total };
+      },
+    }).then((r) => r.audioBuffer);
   const decode = attemptDownload().catch(async (err) => {
     console.warn(`[mapAudio] download/decode failed for shape ${shapeId}, retrying once`, err);
     await new Promise((resolve) => setTimeout(resolve, DOWNLOAD_RETRY_DELAY_MS));
@@ -154,7 +174,10 @@ async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
       toast.error(`Can't play "${trackNameFromUrl(url)}" — ${reason}`);
     }
   } finally {
-    if (chain.bufferPromise === decode) chain.bufferPromise = undefined;
+    if (chain.bufferPromise === decode) {
+      chain.bufferPromise = undefined;
+      chain.loadProgress = undefined;
+    }
   }
 }
 
@@ -523,11 +546,85 @@ function isShapePlaying(shapeId: string): boolean {
   return !!chains.get(shapeId)?.sourceNode;
 }
 
+/** What THIS device is doing with a zone's audio right now — the server's
+ *  playbackState says what SHOULD be playing; this says what IS:
+ *   - "playing": a source node is live (sound is/will be produced here)
+ *   - "loading": download/decode in flight, or a play stashed waiting on it —
+ *     sound is coming, not yet (the slow-connection silent gap)
+ *   - "idle": nothing local (paused, range-culled, or load failed) */
+export type ShapeLocalState = "playing" | "loading" | "idle";
+export interface ZoneLoadInfo {
+  state: ShapeLocalState;
+  /** Download progress in bytes; present only while "loading" with a known
+   *  content-length. Reads 100% during the decode phase. */
+  loadedBytes?: number;
+  totalBytes?: number;
+}
+
+/** Per-shape local snapshot for the load-status UI (polled — mapAudio is
+ *  imperative, so there's nothing to subscribe to). */
+function getLocalStates(): Map<string, ZoneLoadInfo> {
+  const out = new Map<string, ZoneLoadInfo>();
+  for (const [shapeId, chain] of chains.entries()) {
+    const state: ShapeLocalState = chain.sourceNode
+      ? "playing"
+      : chain.bufferPromise || chain.pendingPlay
+        ? "loading"
+        : "idle";
+    const info: ZoneLoadInfo = { state };
+    if (state === "loading" && chain.loadProgress?.total) {
+      info.loadedBytes = chain.loadProgress.loaded;
+      info.totalBytes = chain.loadProgress.total;
+    }
+    out.set(shapeId, info);
+  }
+  return out;
+}
+
+/**
+ * Download + decode every zone's current track NOW, ignoring range gating, so
+ * walking into any zone later starts instantly instead of stalling on a
+ * download (the slow-connection late-join gap). Device-local only — the only
+ * server traffic is the standard AUDIO_SOURCE_LOADED notifications.
+ *
+ * Deliberate RAM-for-latency trade: decoded PCM is ~20 MB per track-minute and
+ * map chains keep buffers until the shape is deleted (range-culling only tears
+ * down source nodes) — which is exactly what makes preloading stick. Hence an
+ * explicit user action, not a default.
+ */
+function preloadAllZones(): { started: number; alreadyLoaded: number; total: number } {
+  const { playlists } = useGlobalStore.getState();
+  let started = 0;
+  let alreadyLoaded = 0;
+  let total = 0;
+  for (const p of playlists.values()) {
+    if (p.id === MAIN_CONTEXT_ID) continue; // Room Pool is a library, not a zone
+    // The track we'd hear on entry: the scheduled one, else the queue head.
+    const url = p.playbackState.audioSource || p.tracks[0]?.url;
+    if (!url) continue;
+    total++;
+    const chain = chains.get(p.id);
+    const decoded = chain?.url === url && !!chain.buffer;
+    // In-flight requires a live bufferPromise — a failed load leaves
+    // requestedUrl set with no promise, and preload should retry those.
+    const inFlight = chain?.requestedUrl === url && !!chain.bufferPromise;
+    if (decoded || inFlight) {
+      alreadyLoaded++;
+      continue;
+    }
+    started++;
+    void loadAudioForShape(p.id, url);
+  }
+  return { started, alreadyLoaded, total };
+}
+
 export const mapAudio = {
   loadAudioForShape,
   playShape,
   pauseShape,
   isShapePlaying,
+  getLocalStates,
+  preloadAllZones,
   setProximityGain,
   unloadShape,
   knownShapeIds,
