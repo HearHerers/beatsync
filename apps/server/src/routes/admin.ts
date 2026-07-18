@@ -18,6 +18,12 @@
 //                                          discovery, reject joins; state + R2
 //                                          audio kept, reversible
 //   POST   /admin/rooms/:id/unarchive    — reverse an archive
+//   POST   /admin/rooms/:id/duplicate    — copy the room's structure (type, map
+//                                          config, shapes, name) into a new room
+//                                          id (?to=<id>, else random 6-digit).
+//                                          No playlists/audio, no chat, no admin
+//                                          token — the first joiner of the copy
+//                                          mints a fresh one
 //   DELETE /admin/rooms/:id              — hard delete: evict, purge R2 audio,
 //                                          drop from memory, tombstone so no
 //                                          older backup can resurrect it

@@ -6,6 +6,7 @@ import {
 } from "@beatsync/shared/";
 import { createHash, randomBytes } from "node:crypto";
 import type { z } from "zod";
+import { getBeatgridIndex } from "./BeatgridIndex";
 
 type ProviderType = "qobuz" | "navidrome";
 
@@ -25,6 +26,9 @@ interface SubsonicSong {
   track?: number;
   year?: number;
   duration?: number;
+  /** Library file path (OpenSubsonic) — its basename is the exact filename
+   * key the Rekordbox beatgrid export is joined on. */
+  path?: string;
 }
 
 export class MusicProviderManager {
@@ -142,6 +146,17 @@ export class MusicProviderManager {
   // wiring real artwork requires a server-side cover-art proxy (see notes).
   private mapSong(song: SubsonicSong): z.infer<typeof RawSearchResponseSchema>["data"]["tracks"]["items"][number] {
     const duration = song.duration ?? 0;
+    // Search-time beatgrid hint: try the library path's basename (the exact
+    // filename key extract_beatgrids.py exports under), then "artist - title"
+    // (the display name a streamed track is stored under, so a hit here agrees
+    // with what auto-attach does when the track actually enters a room).
+    // Duration verification vetoes same-name/different-version matches.
+    const index = getBeatgridIndex();
+    const verifySec = duration > 0 ? duration : undefined;
+    const baseName = song.path?.split("/").pop();
+    const hit =
+      (baseName ? index.gridForDisplayName(baseName, verifySec) : undefined) ??
+      (song.artist && song.title ? index.gridForDisplayName(`${song.artist} - ${song.title}`, verifySec) : undefined);
     return {
       performer: { name: song.artist ?? "Unknown Artist", id: 0 },
       album: {
@@ -158,6 +173,7 @@ export class MusicProviderManager {
       duration,
       parental_warning: false,
       id: song.id,
+      ...(hit && { beatgrid: { bpm: hit.beatgrid.bpm } }),
     };
   }
 

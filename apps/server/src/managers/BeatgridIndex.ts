@@ -89,7 +89,19 @@ export class BeatgridIndex {
     } catch {
       return undefined; // unparseable URL — not matchable
     }
+    return this.gridForKey(name, durationSec);
+  }
 
+  /**
+   * Grid for a display name that never went through an R2 URL — e.g. a
+   * provider search result's library filename or "artist - title" string.
+   * Same two tiers as gridForUrl.
+   */
+  gridForDisplayName(name: string, durationSec?: number): BeatgridHit | undefined {
+    return this.gridForKey(normalizeName(name), durationSec);
+  }
+
+  private gridForKey(name: string, durationSec?: number): BeatgridHit | undefined {
     const owners = this.byKey.get(name);
     if (owners) {
       const viable = owners.filter((e) => !durationConflicts(e, durationSec));

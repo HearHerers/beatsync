@@ -128,7 +128,7 @@ S3_ENDPOINT=
 S3_ACCESS_KEY_ID=
 S3_SECRET_ACCESS_KEY=
 OPERATOR_SECRET=        # optional; enables /admin/* (fail-closed 404 when unset) and rooms:list/room:info --sync
-REKORDBOX_BEATGRIDS_PATH=  # optional; extract_beatgrids.py --all output. Autoloads a beatgrid index at startup (fail-open when unset/missing): tracks entering rooms get grids auto-attached, restored rooms are backfilled after restore, and POST /admin/beatgrids/reload re-reads the file + backfills without a restart. Manual client imports (SET_TRACK_BEATGRID) are stamped "manual" and never overwritten by backfills.
+REKORDBOX_BEATGRIDS_PATH=  # optional; extract_beatgrids.py --all output. Autoloads a beatgrid index at startup (fail-open when unset/missing): tracks entering rooms get grids auto-attached, restored rooms are backfilled after restore, and POST /admin/beatgrids/reload re-reads the file + backfills without a restart. Manual client imports (SET_TRACK_BEATGRID) are stamped "manual" and never overwritten by backfills. Navidrome search results the index recognizes also carry a display-only bpm hint (TrackSchema.beatgrid → BPM badge in the search UI).
 ```
 
 ## Deployment
