@@ -479,21 +479,44 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     }
   }, [mapMetadata]);
 
-  // Center on the user's own position when requested (#66 GPS-switch, #67 button).
-  // Waits until a position is actually available — arming the request before the
-  // first GPS fix lands is fine; this fires as soon as ownPosition appears.
+  // Center on the user's own position when requested (#66 GPS-switch, #67 button,
+  // and #74's default-to-GPS-on-load). Waits until a position is actually
+  // available — arming the request before the first GPS fix lands is fine; this
+  // fires as soon as ownPosition appears.
   useEffect(() => {
     const map = mapRef.current;
     if (!pendingRecenter || !map || !ownPosition) return;
-    // Two MapCanvas instances are mounted at once (desktop + mobile layouts;
-    // the inactive one is display:none, so its map is 0×0). flyTo on a
-    // zero-size map divides by zero in Leaflet's flight math and throws
-    // "Invalid LatLng (NaN, NaN)", crashing the app. Skip without consuming
-    // so the visible instance handles the recenter instead.
-    const size = map.getSize();
-    if (size.x === 0 || size.y === 0) return;
-    map.flyTo([ownPosition.lat, ownPosition.lng], Math.max(map.getZoom(), 18), { duration: 0.6 });
-    useMapStore.getState().consumeRecenter();
+
+    let raf = 0;
+    let tries = 0;
+    const attempt = () => {
+      const m = mapRef.current;
+      if (!m) return;
+      // Two MapCanvas instances are mounted at once (desktop + mobile layouts;
+      // the inactive one is display:none, so its map is 0×0). flyTo on a
+      // zero-size map divides by zero in Leaflet's flight math and throws
+      // "Invalid LatLng (NaN, NaN)", crashing the app.
+      //
+      // On load/refresh the VISIBLE map is also briefly 0×0 — the cached GPS
+      // fix (maximumAge) can land before layout. The old code returned without
+      // consuming, but the effect never re-ran once the map got sized, so the
+      // recenter was silently dropped (worked on the button / manual→GPS switch,
+      // never on initial load). Retry for a short window instead: the visible
+      // instance succeeds once laid out; the hidden one just times out. The
+      // consume below flips pendingRecenter → this effect's cleanup cancels any
+      // still-pending retry on the other instance.
+      const size = m.getSize();
+      if (size.x === 0 || size.y === 0) {
+        if (tries++ < 90) raf = requestAnimationFrame(attempt); // ~1.5s at 60fps
+        return;
+      }
+      m.flyTo([ownPosition.lat, ownPosition.lng], Math.max(m.getZoom(), 18), { duration: 0.6 });
+      useMapStore.getState().consumeRecenter();
+    };
+    attempt();
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [pendingRecenter, ownPosition]);
 
   // ── Sync shapes → Leaflet layers ────────────────────────────────

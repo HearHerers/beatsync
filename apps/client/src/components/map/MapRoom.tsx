@@ -176,6 +176,19 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
   // fix lands, so we center on the GPS position rather than a stale manual one.
   const centerOnNextFixRef = useRef(false);
 
+  // On mobile, default to GPS mode on first mount (#74) — at a real party the
+  // phone's location is what everyone wants, and it doubles as the audio-unlock
+  // gesture path. One-shot: desktop stays manual, and a mobile user can still
+  // switch back to Manual afterwards. Guarded on geolocation support.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) return;
+    const isMobile =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      window.innerWidth < 768;
+    if (isMobile) setLocationMode("gps");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Start/stop GPS watching based on locationMode.
   useEffect(() => {
     if (locationMode === "gps") {
