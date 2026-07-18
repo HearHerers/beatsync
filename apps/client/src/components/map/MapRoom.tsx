@@ -233,11 +233,15 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
       if (!inRange && locallyPlaying) {
         mapAudio.pauseShape(shape.id);
       } else if (inRange && serverIsPlaying && !locallyPlaying && serverPlayback) {
+        // Pass the mirrored playbackRate: a beat-synced zone (SYNC_ZONES,
+        // rate ≠ 1) must resume at its synced tempo — omitting it defaulted
+        // to 1 and silently broke the sync on walk-out/walk-back-in.
         mapAudio.playShape(
           shape.id,
           serverPlayback.audioSource,
           serverPlayback.trackPositionSeconds,
-          serverPlayback.serverTimeToExecute
+          serverPlayback.serverTimeToExecute,
+          serverPlayback.playbackRate ?? 1
         );
       }
     }
