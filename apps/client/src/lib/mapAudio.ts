@@ -295,7 +295,7 @@ function playShape(
   const trackCount = playlistNow?.tracks.length ?? 1;
   const zoneLoops = playlistNow?.loop ?? false;
   source.loop = trackCount <= 1 && zoneLoops;
-  source.playbackRate.value = playbackRate;
+  source.playbackRate.value = playbackRate; // beat-sync tempo (SYNC_ZONES); 1 = normal
   source.connect(chain.proximityGain);
 
   // Beatsync's exact scheduling logic, adapted for per-shape playback. Two cases:
