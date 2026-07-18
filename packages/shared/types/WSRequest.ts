@@ -159,8 +159,10 @@ export const SearchMusicSchema = z.object({
 export const StreamMusicSchema = z.object({
   type: z.literal(ClientActionEnum.enum.STREAM_MUSIC),
   // String to support Navidrome/Subsonic opaque IDs (numeric provider IDs are
-  // sent as strings too). See TrackSchema.id in provider.ts.
-  trackId: z.string(),
+  // sent as strings too). See TrackSchema.id in provider.ts. Coerce so a tab
+  // loaded before this field was narrowed string (it sent a numeric id) doesn't
+  // fail WSRequestSchema.parse and get silently dropped (#124/5).
+  trackId: z.coerce.string(),
   trackName: z.string().optional(),
   /** Route the streamed track into this playlist context (e.g. a shape.id in
    * map rooms). Omitted = the room-wide "main" playlist (audio rooms). */

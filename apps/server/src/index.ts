@@ -111,7 +111,15 @@ if (IS_DEMO_MODE) {
   console.log(`🔑 Admin secret: ${ADMIN_SECRET}`);
 }
 
-if (r2Valid) {
+if (r2Valid && BackupManager.lastRestoreFailed) {
+  // Restore hit a hard failure (couldn't read/parse the backup). Do NOT start
+  // periodic backups — the current state is empty, and backing it up would
+  // overwrite and prune the good backups we failed to read (#124/1). Leave the
+  // data intact for investigation; a fixed restart will pick it back up.
+  console.error(
+    "⛔ Skipping periodic backups: state restore FAILED. Refusing to overwrite existing R2 backups with empty state. Investigate and restart."
+  );
+} else if (r2Valid) {
   // Periodic safety-net backup (restore already ran before listen, above).
   const BACKUP_INTERVAL_MS = 60 * 1000;
   setInterval(() => {
