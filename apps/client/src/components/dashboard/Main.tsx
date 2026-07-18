@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { motion } from "motion/react";
+import { AudioUploaderMinimal } from "../AudioUploaderMinimal";
 import { Queue } from "../Queue";
 import { InlineSearch } from "./InlineSearch";
 
@@ -12,11 +13,12 @@ export const Main = () => {
       )}
     >
       <motion.div className="p-6 pt-4">
-        {/* <h1 className="text-xl font-semibold mb-8">BeatSync</h1> */}
         <div className="mb-6">
           <InlineSearch />
         </div>
-        <Queue className="mb-8" />
+        <Queue className="mb-6" />
+        {/* Upload lives here now that the left sidebar is gone (#93). */}
+        <AudioUploaderMinimal />
       </motion.div>
     </motion.div>
   );

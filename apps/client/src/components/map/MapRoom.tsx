@@ -21,7 +21,6 @@
 // are reused; the Queue + Uploader are parameterized by contextId == shape.id
 // so the per-shape playlist GUI is identical to the audio-room playlist GUI.
 
-import { Left } from "@/components/dashboard/Left";
 import { Right } from "@/components/dashboard/Right";
 import { SettingsPanel } from "@/components/dashboard/SettingsPanel";
 import { TopBar } from "@/components/room/TopBar";
@@ -50,7 +49,6 @@ import {
   MessageCircle,
   MousePointer,
   Settings,
-  Users,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
@@ -80,7 +78,6 @@ const usePanelControl = (): PanelControl => {
 };
 
 interface DesktopPanels {
-  users: PanelControl;
   map: PanelControl;
   playlist: PanelControl;
   chat: PanelControl;
@@ -97,7 +94,7 @@ interface DesktopPanels {
 // setLayout so the space comes from / returns to the center panel instead.
 
 // Panel ids in the horizontal group → their DesktopPanels key.
-const SIDE_PANELS = { left: "users", right: "chat", settings: "settings" } as const;
+const SIDE_PANELS = { right: "chat", settings: "settings" } as const;
 type SidePanelId = keyof typeof SIDE_PANELS;
 
 // Keep in sync with the ResizablePanel props in DesktopLayout.
@@ -281,7 +278,6 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
   };
 
   const desktopPanels: DesktopPanels = {
-    users: usePanelControl(),
     map: usePanelControl(),
     playlist: usePanelControl(),
     chat: usePanelControl(),
@@ -300,7 +296,6 @@ export const MapRoom = ({ roomId }: MapRoomProps) => {
     <div className="hidden lg:flex items-center gap-1">
       {(
         [
-          { label: "Users", icon: <Users className="size-3" />, panel: desktopPanels.users, sideId: "left" },
           { label: "Map", icon: <MapIcon className="size-3" />, panel: desktopPanels.map },
           { label: "Playlist", icon: <ListMusic className="size-3" />, panel: desktopPanels.playlist },
           { label: "Chat", icon: <MessageCircle className="size-3" />, panel: desktopPanels.chat, sideId: "right" },
@@ -417,7 +412,6 @@ interface DesktopLayoutProps extends PaneProps {
 }
 
 const DesktopLayout = ({ canMutate, overlays, panels, groupRef }: DesktopLayoutProps) => {
-  const { ref: leftRef, collapsed: leftCollapsed, setCollapsed: setLeftCollapsed } = panels.users;
   const { ref: mapRef, collapsed: mapCollapsed, setCollapsed: setMapCollapsed } = panels.map;
   const { ref: playlistRef, collapsed: playlistCollapsed, setCollapsed: setPlaylistCollapsed } = panels.playlist;
   const { ref: rightRef, collapsed: rightCollapsed, setCollapsed: setRightCollapsed } = panels.chat;
@@ -427,8 +421,8 @@ const DesktopLayout = ({ canMutate, overlays, panels, groupRef }: DesktopLayoutP
   // versioned: bump it whenever the panel list changes so a stale persisted
   // layout can't be applied to a different set of panels.
   const horizontal = useDefaultLayout({
-    id: "mapRoom.horizontal.v2",
-    panelIds: ["left", "center", "right", "settings"],
+    id: "mapRoom.horizontal.v3",
+    panelIds: ["center", "right", "settings"],
   });
   const vertical = useDefaultLayout({
     id: "mapRoom.vertical",
@@ -442,37 +436,7 @@ const DesktopLayout = ({ canMutate, overlays, panels, groupRef }: DesktopLayoutP
       defaultLayout={horizontal.defaultLayout}
       onLayoutChanged={horizontal.onLayoutChanged}
     >
-      <ResizablePanel
-        id="left"
-        panelRef={leftRef}
-        collapsible
-        collapsedSize="40px"
-        minSize="14%"
-        defaultSize="20%"
-        onResize={() => setLeftCollapsed(leftRef.current?.isCollapsed() ?? false)}
-      >
-        {leftCollapsed ? (
-          <CollapsedRail
-            label="Users"
-            icon={<Users className="size-3.5" />}
-            onClick={() => leftRef.current?.expand()}
-            side="left"
-          />
-        ) : (
-          <PanelShell
-            label="Users"
-            icon={<Users className="size-3.5" />}
-            onCollapse={() => leftRef.current?.collapse()}
-            side="left"
-          >
-            <Left className="flex h-full w-full lg:w-full" hideUploader hideDelayControl roomLabel="HearHere room" />
-          </PanelShell>
-        )}
-      </ResizablePanel>
-
-      <ResizableHandle orientation="horizontal" withHandle />
-
-      <ResizablePanel id="center" minSize="30%" defaultSize="55%">
+      <ResizablePanel id="center" minSize="30%" defaultSize="65%">
         <ResizablePanelGroup
           orientation="vertical"
           defaultLayout={vertical.defaultLayout}
@@ -606,7 +570,6 @@ const DesktopLayout = ({ canMutate, overlays, panels, groupRef }: DesktopLayoutP
 // available space below. Map + Playlist are shown by default; Users + Chat
 // are hidden by default to keep the limited mobile real estate focused.
 const MobileLayout = ({ canMutate, overlays }: PaneProps) => {
-  const [usersOpen, setUsersOpen] = useState(false);
   const [mapOpen, setMapOpen] = useState(true);
   const [playlistOpen, setPlaylistOpen] = useState(true);
   const [chatOpen, setChatOpen] = useState(false);
@@ -618,7 +581,6 @@ const MobileLayout = ({ canMutate, overlays }: PaneProps) => {
     open: boolean;
     setOpen: (v: boolean) => void;
   }> = [
-    { label: "Users", icon: <Users className="size-3.5" />, open: usersOpen, setOpen: setUsersOpen },
     { label: "Map", icon: <MapIcon className="size-3.5" />, open: mapOpen, setOpen: setMapOpen },
     { label: "Playlist", icon: <ListMusic className="size-3.5" />, open: playlistOpen, setOpen: setPlaylistOpen },
     { label: "Chat", icon: <MessageCircle className="size-3.5" />, open: chatOpen, setOpen: setChatOpen },
@@ -644,11 +606,6 @@ const MobileLayout = ({ canMutate, overlays }: PaneProps) => {
       </div>
 
       <div className="flex flex-1 flex-col overflow-hidden min-h-0">
-        {usersOpen && (
-          <div className="flex-1 min-h-0 overflow-hidden border-b border-neutral-800/50">
-            <Left className="flex h-full w-full lg:w-full border-l-0" hideUploader roomLabel="HearHere room" />
-          </div>
-        )}
         {mapOpen && (
           <div className="relative flex-1 min-h-0">
             {overlays}

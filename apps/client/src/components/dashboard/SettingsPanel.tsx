@@ -12,6 +12,7 @@ import { Separator } from "../ui/separator";
 import { BluetoothDelayControl } from "./BluetoothDelayControl";
 import { GlobalVolumeControl } from "./GlobalVolumeControl";
 import { MobileNudgeControl } from "./MobileNudgeControl";
+import { PlaybackPermissions } from "./PlaybackPermissions";
 
 interface SettingsPanelProps {
   className?: string;
@@ -38,6 +39,11 @@ export const SettingsPanel = ({ className }: SettingsPanelProps) => {
           NTP: {syncMeasurementCount}/{MAX_NTP_MEASUREMENTS}
         </span>
       </div>
+
+      <Separator className="bg-neutral-800/50" />
+
+      {/* Playback permissions moved here from the (removed) left sidebar (#93). */}
+      <PlaybackPermissions />
 
       <Separator className="bg-neutral-800/50" />
 
