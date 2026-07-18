@@ -7,6 +7,8 @@
 import { describe, expect, it } from "bun:test";
 import {
   buildBeatgridKeyMap,
+  looseNameTokens,
+  looseTitleMatches,
   matchBeatgridsToTracks,
   normalizeName,
   sanitizeDisplayName,
@@ -137,6 +139,28 @@ describe("normalizeName hardening (BEATGRID_MATCHING_PLAN.md)", () => {
   it("stays exact: a different title does not fuzzy-match", () => {
     const r = matchBeatgridsToTracks(doc([HEAT3]), [r2Url("Heat 33")]);
     expect(r.matches).toHaveLength(0);
+  });
+});
+
+describe("looseNameTokens / looseTitleMatches (duration-fallback tier)", () => {
+  it("strips track numbers, parenthetical qualifiers, and feat clauses", () => {
+    expect(looseNameTokens("06 - Shinichi Atobe - Heat 3.flac")).toEqual(["shinichi", "atobe", "heat", "3"]);
+    expect(looseNameTokens("Heat 3 (2019 Remaster) [Deluxe]")).toEqual(["heat", "3"]);
+    expect(looseNameTokens("Song feat. Somebody Else")).toEqual(["song"]);
+    expect(looseNameTokens("Song (Extended Mix)")).toEqual(["song"]);
+  });
+
+  it("agrees on containment, not equality", () => {
+    const roomTokens = new Set(looseNameTokens("01 - Shinichi Atobe - Heat 3 (Remastered)"));
+    expect(looseTitleMatches(HEAT3, roomTokens)).toBe(true);
+    expect(looseTitleMatches(BUMP, roomTokens)).toBe(false); // different title
+  });
+
+  it("falls back to the filename when the entry has no title, and never matches on empty", () => {
+    const untitled = { ...HEAT3, title: null };
+    expect(looseTitleMatches(untitled, new Set(looseNameTokens("Shinichi Atobe - Heat 3")))).toBe(true);
+    const blank = { ...HEAT3, title: null, file: "().flac" };
+    expect(looseTitleMatches(blank, new Set(["anything"]))).toBe(false);
   });
 });
 

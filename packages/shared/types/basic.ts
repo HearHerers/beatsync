@@ -70,6 +70,13 @@ export const AudioSourceSchema = z.object({
   /** Present once beatgrid data is attached (curator import or server autoload). */
   beatgrid: BeatgridSchema.optional(),
   beatgridSource: BeatgridSourceEnum.optional(),
+  /**
+   * Real audio length in seconds, when known: reported by the first client to
+   * decode the file (AUDIO_SOURCE_LOADED) or from provider metadata at stream
+   * time. Used to verify beatgrid matches (wrong-version guard) and to enable
+   * the duration+loose-title fallback match tier.
+   */
+  durationSec: z.number().positive().optional(),
 });
 export type AudioSourceType = z.infer<typeof AudioSourceSchema>;
 

@@ -175,6 +175,120 @@ describe("RoomManager auto-attach + backfill", () => {
   });
 });
 
+// Duration verification + the duration+loose-title fallback tier
+// (BEATGRID_MATCHING_PLAN.md Phase 2). RADIO and EXTENDED are two versions of
+// the same title with different lengths and different grids — the exact
+// wrong-version scenario the duration check exists for.
+const RADIO = {
+  file: "Anthem.mp3",
+  title: "Anthem",
+  artist: "DJ X",
+  bpm: 128,
+  durationSec: 210,
+  firstBeatSec: 0.1,
+  firstDownbeatSec: 0.1,
+  beatsPerBar: 4,
+  grid: "constant" as const,
+};
+const EXTENDED = {
+  file: "Anthem (Extended Mix).mp3",
+  title: "Anthem (Extended Mix)",
+  artist: "DJ X",
+  bpm: 128,
+  durationSec: 420,
+  firstBeatSec: 0.25,
+  firstDownbeatSec: 0.25,
+  beatsPerBar: 4,
+  grid: "constant" as const,
+};
+const VERSIONS_DOC = { beatsyncBeatgrids: 1 as const, tracks: [RADIO, EXTENDED] };
+
+describe("duration verification + fallback tier", () => {
+  it("keeps an exact match when durations agree, vetoes + rescues when they don't", () => {
+    const index = new BeatgridIndex(VERSIONS_DOC);
+    const url = r2Url("Anthem"); // exact key hits RADIO
+    // Duration unknown → exact match stands (existing behavior).
+    expect(index.gridForUrl(url)?.beatgrid.firstBeatSec).toBe(0.1);
+    // Duration agrees with RADIO → RADIO.
+    expect(index.gridForUrl(url, 210.4)?.beatgrid.firstBeatSec).toBe(0.1);
+    // Duration says this file is the extended version → exact RADIO match is
+    // vetoed and the fallback tier finds EXTENDED (unique 420s candidate
+    // whose stripped title "anthem" is contained in the display name).
+    expect(index.gridForUrl(url, 419.8)?.beatgrid.firstBeatSec).toBe(0.25);
+    expect(index.durationConflict(url, 419.8)).toBe(true);
+    expect(index.durationConflict(url, 210.4)).toBe(false);
+  });
+
+  it("matches by duration + loose title when every exact key misses", () => {
+    const index = new BeatgridIndex(VERSIONS_DOC);
+    // Decorated display name no exact key covers: track number + edit suffix.
+    const url = r2Url("01 - DJ X - Anthem (Club Edit)");
+    expect(index.gridForUrl(url)).toBeUndefined(); // no duration → no fallback
+    expect(index.gridForUrl(url, 210.5)?.beatgrid.firstBeatSec).toBe(0.1);
+    expect(index.gridForUrl(url, 420.1)?.beatgrid.firstBeatSec).toBe(0.25);
+    // Duration matching neither version → nothing.
+    expect(index.gridForUrl(url, 300)).toBeUndefined();
+  });
+
+  it("refuses the fallback when more than one candidate survives", () => {
+    const vip = { ...RADIO, file: "Anthem (VIP).mp3", title: "Anthem (VIP)", durationSec: 210.5 };
+    const index = new BeatgridIndex({ beatsyncBeatgrids: 1, tracks: [RADIO, vip] });
+    // Both entries are ~210s and both stripped titles ("anthem") are contained.
+    expect(index.gridForUrl(r2Url("Some Anthem Bootleg"), 210.3)).toBeUndefined();
+  });
+
+  it("setTrackDuration stamps copies and attaches via the fallback tier", () => {
+    setBeatgridIndex(new BeatgridIndex(VERSIONS_DOC));
+    const room = new RoomManager("duration-attach");
+    room.addPlaylist("zoneA", { loop: true });
+    const url = r2Url("DJ X - Anthem (Radio Edit)"); // exact keys miss
+    room.addTrackToContext("zoneA", { url });
+    expect(room.getPlaylist("zoneA")!.tracks[0].beatgrid).toBeUndefined();
+
+    // First decode reports the duration → fallback attaches RADIO everywhere.
+    expect(room.setTrackDuration(url, 210.2)).toBe(2); // zoneA + pool
+    const track = room.getPlaylist("zoneA")!.tracks[0];
+    expect(track.durationSec).toBe(210.2);
+    expect(track.beatgrid?.firstBeatSec).toBe(0.1);
+    expect(track.beatgridSource).toBe("auto");
+    // Subsequent identical reports (other clients) are no-ops.
+    expect(room.setTrackDuration(url, 210.23)).toBe(0);
+  });
+
+  it("setTrackDuration detaches a wrong-version name match; backfill agrees", () => {
+    setBeatgridIndex(new BeatgridIndex({ beatsyncBeatgrids: 1, tracks: [RADIO] }));
+    const room = new RoomManager("duration-detach");
+    room.addPlaylist("zoneA", { loop: true });
+    const url = r2Url("Anthem");
+    room.addTrackToContext("zoneA", { url }); // exact name match → RADIO grid
+    expect(room.getPlaylist("zoneA")!.tracks[0].beatgrid?.firstBeatSec).toBe(0.1);
+
+    // The real file turns out to be ~420s: the RADIO grid is for a different
+    // version and there is no fallback winner → detach.
+    expect(room.setTrackDuration(url, 419.9)).toBe(2);
+    const track = room.getPlaylist("zoneA")!.tracks[0];
+    expect(track.beatgrid).toBeUndefined();
+    expect(track.beatgridSource).toBeUndefined();
+    expect(track.durationSec).toBe(419.9);
+
+    // Backfill won't re-attach it either (same duration evidence)...
+    expect(room.backfillBeatgrids()).toBe(0);
+    // ...but a corrected export (durations now agree) re-attaches on reload.
+    setBeatgridIndex(new BeatgridIndex({ beatsyncBeatgrids: 1, tracks: [{ ...RADIO, durationSec: 420 }] }));
+    expect(room.backfillBeatgrids()).toBe(2);
+    expect(room.getPlaylist("zoneA")!.tracks[0].beatgrid?.firstBeatSec).toBe(0.1);
+  });
+
+  it("rejects a mismatched attach at add time when the duration is already known", () => {
+    setBeatgridIndex(new BeatgridIndex({ beatsyncBeatgrids: 1, tracks: [RADIO] }));
+    const room = new RoomManager("duration-add-veto");
+    room.addPlaylist("zoneA", { loop: true });
+    // Provider stamped 420s at stream time; the 210s RADIO grid must not attach.
+    room.addTrackToContext("zoneA", { url: r2Url("Anthem"), durationSec: 420 });
+    expect(room.getPlaylist("zoneA")!.tracks[0].beatgrid).toBeUndefined();
+  });
+});
+
 describe("POST /admin/beatgrids/reload", () => {
   const request = (token?: string) =>
     [

@@ -2,7 +2,7 @@ import { calculateScheduleTimeMs, DEFAULT_CLIENT_RTT_MS } from "@/config";
 import { IS_DEMO_MODE } from "@/demo";
 import { deleteObjectsWithPrefix } from "@/lib/r2";
 import { computeZoneSync } from "@/lib/zoneSync";
-import { getBeatgridIndex } from "@/managers/BeatgridIndex";
+import { getBeatgridIndex, type BeatgridIndex } from "@/managers/BeatgridIndex";
 import { ChatManager } from "@/managers/ChatManager";
 import { calculateGainFromDistanceToSource } from "@/spatial";
 import { debounce } from "@/utils/debounce";
@@ -913,7 +913,7 @@ export class RoomManager {
    */
   private withAutoBeatgrid(source: AudioSourceType): AudioSourceType {
     if (source.beatgrid) return source;
-    const hit = getBeatgridIndex().gridForUrl(source.url);
+    const hit = getBeatgridIndex().gridForUrl(source.url, source.durationSec);
     if (!hit) return source;
     return { ...source, beatgrid: hit.beatgrid, beatgridSource: "auto" };
   }
@@ -1870,12 +1870,67 @@ export class RoomManager {
     let changed = 0;
     for (const playlist of this.playlists.values()) {
       playlist.tracks = playlist.tracks.map((t) => {
-        if (t.beatgrid && t.beatgridSource !== "auto") return t; // manual/legacy: never touched
-        const hit = index.gridForUrl(t.url);
-        if (!hit) return t;
-        if (t.beatgrid && beatgridsEqual(t.beatgrid, hit.beatgrid)) return t;
+        const updated = this.reconcileTrackBeatgrid(t, index);
+        if (!updated) return t;
         changed++;
-        return { ...t, beatgrid: hit.beatgrid, beatgridSource: "auto" };
+        return updated;
+      });
+    }
+    return changed;
+  }
+
+  /**
+   * Reconcile one track's grid against the beatgrid index (duration-aware —
+   * see BeatgridIndex.gridForUrl). Returns the updated track, or null when
+   * nothing changes. Manual grids — including pre-provenance ones with no
+   * beatgridSource — are never touched. An "auto" grid whose exact-name entry
+   * is contradicted by the real duration (and has no fallback winner) is
+   * DETACHED: evidence says it belongs to a different version of the track.
+   * Mere absence from the index keeps whatever the track has (conservative).
+   */
+  private reconcileTrackBeatgrid(t: AudioSourceType, index: BeatgridIndex): AudioSourceType | null {
+    if (t.beatgrid && t.beatgridSource !== "auto") return null; // manual/legacy: never touched
+    const hit = index.gridForUrl(t.url, t.durationSec);
+    if (!hit) {
+      if (t.beatgrid && t.durationSec !== undefined && index.durationConflict(t.url, t.durationSec)) {
+        return { ...t, beatgrid: undefined, beatgridSource: undefined };
+      }
+      return null;
+    }
+    if (t.beatgrid && beatgridsEqual(t.beatgrid, hit.beatgrid)) return null;
+    return { ...t, beatgrid: hit.beatgrid, beatgridSource: "auto" };
+  }
+
+  /**
+   * Record the real audio duration for every copy of a track URL (a property
+   * of the audio file, like the grid), then reconcile those copies against
+   * the beatgrid index — a newly learned duration can attach a grid (the
+   * duration+loose-title fallback tier), correct one, or detach a
+   * wrong-version name match. Returns how many track entries changed
+   * (duration and/or grid); 0 means nothing to broadcast.
+   *
+   * Fires on every client's AUDIO_SOURCE_LOADED, so it must be idempotent:
+   * the stamp is skipped when the stored duration is within 0.5 s (decoder
+   * padding differs slightly across browsers; grid tolerances are coarser).
+   */
+  setTrackDuration(url: string, durationSec: number): number {
+    const rounded = Math.round(durationSec * 100) / 100;
+    const index = getBeatgridIndex();
+    let changed = 0;
+    for (const playlist of this.playlists.values()) {
+      playlist.tracks = playlist.tracks.map((t) => {
+        if (t.url !== url) return t;
+        let next = t;
+        if (t.durationSec === undefined || Math.abs(t.durationSec - rounded) > 0.5) {
+          next = { ...next, durationSec: rounded };
+        }
+        if (index.size > 0) {
+          const reconciled = this.reconcileTrackBeatgrid(next, index);
+          if (reconciled) next = reconciled;
+        }
+        if (next === t) return t;
+        changed++;
+        return next;
       });
     }
     return changed;

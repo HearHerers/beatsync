@@ -170,6 +170,9 @@ export const StreamMusicSchema = z.object({
   // sent as strings too). See TrackSchema.id in provider.ts.
   trackId: z.string(),
   trackName: z.string().optional(),
+  /** Provider-reported track length (seconds) — stamped onto the stored track
+   * so beatgrid matching can duration-verify without waiting for a decode. */
+  trackDurationSec: z.number().positive().optional(),
   /** Route the streamed track into this playlist context (e.g. a shape.id in
    * map rooms). Omitted = the room-wide "main" playlist (audio rooms). */
   contextId: z.string().optional(),
