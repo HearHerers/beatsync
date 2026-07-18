@@ -510,11 +510,12 @@ export const useGlobalStore = create<GlobalState>((set, get) => {
         addURLToLRU(url);
 
         const { socket } = getSocket(state);
+        const cachedDuration = existing.buffer?.duration;
         sendWSRequest({
           ws: socket,
           request: {
             type: ClientActionEnum.enum.AUDIO_SOURCE_LOADED,
-            source: { url },
+            source: { url, ...(cachedDuration !== undefined && cachedDuration > 0 && { durationSec: cachedDuration }) },
             ...(contextId !== undefined && { contextId }),
           },
         });
@@ -553,13 +554,14 @@ export const useGlobalStore = create<GlobalState>((set, get) => {
       // Update LRU queue after successfully loading a new buffer
       addURLToLRU(url);
 
-      // Send message to server that the source is loaded (re-read socket in case of reconnect during fetch)
+      // Send message to server that the source is loaded (re-read socket in case of reconnect during fetch).
+      // The decoded duration lets the server duration-verify beatgrid matches.
       const { socket } = getSocket(get());
       sendWSRequest({
         ws: socket,
         request: {
           type: ClientActionEnum.enum.AUDIO_SOURCE_LOADED,
-          source: { url },
+          source: { url, ...(audioBuffer.duration > 0 && { durationSec: audioBuffer.duration }) },
           ...(contextId !== undefined && { contextId }),
         },
       });

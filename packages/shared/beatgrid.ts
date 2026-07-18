@@ -99,6 +99,54 @@ export function extractDisplayNameFromUrl(url: string): string {
   return fullFileName.replace(/\.[^/.]+$/, "");
 }
 
+// ── Duration tolerances ─────────────────────────────────────────────
+
+/**
+ * An exact-key match whose export duration disagrees with the real audio
+ * duration by more than this is vetoed — same filename/title but a different
+ * version (radio edit vs. extended mix). Generous because provider metadata
+ * durations are whole seconds and encoders pad edges slightly.
+ */
+export const DURATION_VERIFY_TOLERANCE_SEC = 3;
+
+/**
+ * Candidate window for the duration+loose-title fallback tier. Tighter than
+ * the verify tolerance: here duration is doing identification work, not just
+ * vetoing.
+ */
+export const DURATION_FALLBACK_TOLERANCE_SEC = 1.5;
+
+// ── Loose title matching (fallback tier only) ───────────────────────
+
+/**
+ * Tokens of a display name / title for the loose-title check: normalized,
+ * then stripped of the decorations that legitimately differ between a
+ * library filename and a room display name — leading track numbers,
+ * parenthetical/bracketed qualifiers ("(2019 Remaster)"), and feat. clauses —
+ * split on non-alphanumerics. Deliberately structural, not fuzzy: no edit
+ * distance, no stemming. Safe ONLY combined with a duration agreement — the
+ * "01 - Intro" collision problem disappears when the durations must match.
+ */
+export function looseNameTokens(name: string): string[] {
+  return normalizeName(name)
+    .replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, " ") // parenthetical qualifiers
+    .replace(/\b(?:feat|ft|featuring)\b.*$/, " ") // feat. clauses (to end)
+    .replace(/^\s*\d+\s*[-._]\s*/, "") // leading track number
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((t) => t.length > 0);
+}
+
+/**
+ * Loose agreement between an export entry and a room display name: every
+ * token of the entry's title (filename when untitled) appears among the room
+ * name's tokens. Containment, not equality — "Heat 3" agrees with
+ * "06 - Shinichi Atobe - Heat 3 (Remastered)".
+ */
+export function looseTitleMatches(track: BeatgridExportTrackType, roomTokens: ReadonlySet<string>): boolean {
+  const tokens = looseNameTokens(track.title?.trim() || track.file);
+  return tokens.length > 0 && tokens.every((t) => roomTokens.has(t));
+}
+
 // ── Match keys ──────────────────────────────────────────────────────
 
 /**

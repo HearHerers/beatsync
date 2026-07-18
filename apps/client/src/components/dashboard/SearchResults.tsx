@@ -91,6 +91,9 @@ export function SearchResults({ className, onTrackSelect, contextId }: SearchRes
           type: ClientActionEnum.enum.STREAM_MUSIC,
           trackId: track.id,
           trackName: formattedTrackName,
+          // Provider-reported length: lets the server duration-verify beatgrid
+          // matches for the stored track without waiting for a client decode.
+          ...(track.duration > 0 && { trackDurationSec: track.duration }),
           contextId,
         },
       });

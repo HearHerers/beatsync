@@ -79,7 +79,7 @@ function getOrCreateChain(shapeId: string): ShapeChain {
 async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
   const chain = getOrCreateChain(shapeId);
   if (chain.url === url && chain.buffer) {
-    notifyLoaded(shapeId, url);
+    notifyLoaded(shapeId, url, chain.buffer.duration);
     return;
   }
 
@@ -121,7 +121,7 @@ async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
     useGlobalStore.setState((state) => ({
       audioSources: state.audioSources.map((as) => (as.source.url === url ? { ...as, status: "loaded", buffer } : as)),
     }));
-    notifyLoaded(shapeId, url);
+    notifyLoaded(shapeId, url, buffer.duration);
 
     // If a play() arrived while we were decoding (late-join resume), re-fire it now
     // that the buffer is ready. Only honor it if the URL still matches the pending
@@ -141,16 +141,18 @@ async function loadAudioForShape(shapeId: string, url: string): Promise<void> {
   }
 }
 
-function notifyLoaded(shapeId: string, url: string): void {
+function notifyLoaded(shapeId: string, url: string, durationSec?: number): void {
   const ws = useGlobalStore.getState().socket;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   // shapeId IS the contextId — every shape owns a playlist context with id =
   // shape.id, so the per-context load gate keys on the same string.
+  // durationSec (the decoded buffer's length) lets the server duration-verify
+  // beatgrid matches for this track.
   sendWSRequest({
     ws,
     request: {
       type: ClientActionEnum.enum.AUDIO_SOURCE_LOADED,
-      source: { url },
+      source: { url, ...(durationSec !== undefined && durationSec > 0 && { durationSec }) },
       contextId: shapeId,
     },
   });

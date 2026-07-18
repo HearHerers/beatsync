@@ -17,7 +17,11 @@ import {
   beatgridFromExportTrack,
   BeatgridExportSchema,
   buildBeatgridKeyMap,
+  DURATION_FALLBACK_TOLERANCE_SEC,
+  DURATION_VERIFY_TOLERANCE_SEC,
   extractDisplayNameFromUrl,
+  looseNameTokens,
+  looseTitleMatches,
   normalizeName,
   type BeatgridExportTrackType,
   type BeatgridExportType,
@@ -35,6 +39,8 @@ export interface BeatgridHit {
 
 export class BeatgridIndex {
   private readonly byKey: Map<string, BeatgridExportTrackType>;
+  /** All constant-grid entries — scanned by the duration fallback tier. */
+  private readonly entries: BeatgridExportTrackType[];
   readonly tracks: number;
   readonly skippedDynamic: number;
   readonly ambiguousKeys: number;
@@ -42,6 +48,7 @@ export class BeatgridIndex {
   constructor(doc: BeatgridExportType | null) {
     if (doc === null) {
       this.byKey = new Map();
+      this.entries = [];
       this.tracks = 0;
       this.skippedDynamic = 0;
       this.ambiguousKeys = 0;
@@ -49,6 +56,7 @@ export class BeatgridIndex {
     }
     const { byKey, tracks, skippedDynamic, ambiguousKeys } = buildBeatgridKeyMap(doc);
     this.byKey = byKey;
+    this.entries = doc.tracks.filter((t) => t.grid !== "dynamic");
     this.tracks = tracks;
     this.skippedDynamic = skippedDynamic;
     this.ambiguousKeys = ambiguousKeys;
@@ -58,23 +66,74 @@ export class BeatgridIndex {
     return this.byKey.size;
   }
 
-  /** Grid for one of our audio URLs, or undefined if the collection has no
-   *  unambiguous entry for its display name. */
-  gridForUrl(url: string): BeatgridHit | undefined {
+  /**
+   * Grid for one of our audio URLs, or undefined if the collection has no
+   * trustworthy entry for it. Two tiers:
+   *
+   * 1. Exact key lookup on the normalized display name. When the real audio
+   *    duration is known AND the entry has one, a disagreement beyond
+   *    DURATION_VERIFY_TOLERANCE_SEC vetoes the match (same name, different
+   *    version — radio edit vs. extended mix) and falls through to tier 2,
+   *    which may find the right version.
+   * 2. Duration + loose-title fallback (only when the real duration is
+   *    known): entries within DURATION_FALLBACK_TOLERANCE_SEC whose title
+   *    tokens all appear in the display name. Exactly one survivor matches;
+   *    zero or several ⇒ no match (same ambiguity posture as exact keys).
+   */
+  gridForUrl(url: string, durationSec?: number): BeatgridHit | undefined {
     let name: string;
     try {
       name = normalizeName(extractDisplayNameFromUrl(url));
     } catch {
       return undefined; // unparseable URL — not matchable
     }
-    const entry = this.byKey.get(name);
-    if (!entry) return undefined;
-    return {
-      beatgrid: beatgridFromExportTrack(entry),
-      ...(entry.durationSec !== undefined && { durationSec: entry.durationSec }),
-      file: entry.file,
-    };
+
+    const exact = this.byKey.get(name);
+    if (exact && !durationConflicts(exact, durationSec)) return toHit(exact);
+
+    if (durationSec === undefined) return undefined;
+    const roomTokens = new Set(looseNameTokens(name));
+    const candidates = this.entries.filter(
+      (e) =>
+        e.durationSec !== undefined &&
+        Math.abs(e.durationSec - durationSec) <= DURATION_FALLBACK_TOLERANCE_SEC &&
+        looseTitleMatches(e, roomTokens)
+    );
+    return candidates.length === 1 ? toHit(candidates[0]) : undefined;
   }
+
+  /**
+   * True when the URL's exact-key entry exists but its export duration
+   * disagrees with the given real duration — evidence that a grid matched by
+   * name alone is for a different version of the track. Used by backfill to
+   * DETACH such "auto" grids (mere absence from the index keeps them).
+   */
+  durationConflict(url: string, durationSec: number): boolean {
+    let name: string;
+    try {
+      name = normalizeName(extractDisplayNameFromUrl(url));
+    } catch {
+      return false;
+    }
+    const exact = this.byKey.get(name);
+    return exact !== undefined && durationConflicts(exact, durationSec);
+  }
+}
+
+function durationConflicts(entry: BeatgridExportTrackType, durationSec: number | undefined): boolean {
+  return (
+    durationSec !== undefined &&
+    entry.durationSec !== undefined &&
+    Math.abs(entry.durationSec - durationSec) > DURATION_VERIFY_TOLERANCE_SEC
+  );
+}
+
+function toHit(entry: BeatgridExportTrackType): BeatgridHit {
+  return {
+    beatgrid: beatgridFromExportTrack(entry),
+    ...(entry.durationSec !== undefined && { durationSec: entry.durationSec }),
+    file: entry.file,
+  };
 }
 
 const EMPTY_INDEX = new BeatgridIndex(null);
