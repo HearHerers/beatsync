@@ -562,6 +562,11 @@ export interface ZoneLoadInfo {
    *  content-length. Reads 100% during the decode phase. */
   loadedBytes?: number;
   totalBytes?: number;
+  /** URL of the track this zone has DECODED and ready. Consumers compare it to
+   *  the zone's current track to tell "loaded, plays instantly" (map: green)
+   *  from "would need a download first" (map: gray). Absent while nothing is
+   *  buffered — a zone with no chain at all is simply missing from the Map. */
+  bufferedUrl?: string;
 }
 
 /** Per-shape local snapshot for the load-status UI (polled — mapAudio is
@@ -578,6 +583,9 @@ function getLocalStates(): Map<string, ZoneLoadInfo> {
     if (state === "loading" && chain.loadProgress?.total) {
       info.loadedBytes = chain.loadProgress.loaded;
       info.totalBytes = chain.loadProgress.total;
+    }
+    if (chain.buffer && chain.url) {
+      info.bufferedUrl = chain.url;
     }
     out.set(shapeId, info);
   }

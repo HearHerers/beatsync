@@ -192,8 +192,11 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   const setOwnPosition = useMapStore((s) => s.setOwnPosition);
   const pendingRecenter = useMapStore((s) => s.pendingRecenter);
   const { clientId: myClientId } = useClientId();
-  // Per-zone local audio state — drives the amber "still downloading" tint.
+  // Per-zone local audio state — drives the amber "still downloading" and
+  // gray "not downloaded here yet" tints (compared against each zone's
+  // current track from playlists).
   const localStates = useLocalZonePlayback();
+  const playlists = useGlobalStore((s) => s.playlists);
 
   // Keep Leaflet's internal size cache in sync with the container. Required
   // when the panel surrounding the map is resized or collapsed/expanded —
@@ -591,22 +594,32 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
 
   // ── Highlight the selected shape + local load state ─────────────
   // Color precedence: selected (yellow) > audio still loading on THIS device
-  // (amber) > default (green). Loading matches the amber used by the bottom-bar
-  // and zone-header indicators; the selected zone stays yellow because the side
-  // panel already shows its "loading audio… %" state.
+  // (amber) > has audio but not downloaded here yet (gray) > ready/empty
+  // (green). Gray answers "will this play instantly if I walk in?" — a
+  // late-joiner sees every zone gray until its track is buffered (walk-in or
+  // Preload), then green. Zones with no tracks stay green: there is nothing to
+  // download, so gray would be noise. Loading amber matches the bottom-bar and
+  // zone-header indicators; the selected zone stays yellow because the side
+  // panel already shows its load state in detail.
   useEffect(() => {
     for (const [id, layer] of shapeLayersRef.current.entries()) {
+      if (!(layer instanceof L.Path)) continue;
       const isSelected = id === selectedShapeId;
-      const isLoading = localStates.get(id)?.state === "loading";
-      if (layer instanceof L.Path) {
-        layer.setStyle({
-          color: isSelected ? "#fde047" : isLoading ? "#f59e0b" : "#22c55e",
-          weight: isSelected ? 3 : 2,
-          fillOpacity: isSelected ? 0.25 : isLoading ? 0.2 : 0.15,
-        });
-      }
+      const info = localStates.get(id);
+      const isLoading = info?.state === "loading";
+      // The track a walk-in would play: the scheduled one, else the queue head
+      // (same rule as preloadAllZones). Unloaded = that track isn't the one
+      // buffered — covers no-chain-yet AND a stale buffer after a track change.
+      const playlist = playlists.get(id);
+      const entryUrl = playlist ? playlist.playbackState.audioSource || playlist.tracks[0]?.url : undefined;
+      const isUnloaded = !!entryUrl && !isLoading && info?.bufferedUrl !== entryUrl;
+      layer.setStyle({
+        color: isSelected ? "#fde047" : isLoading ? "#f59e0b" : isUnloaded ? "#9ca3af" : "#22c55e",
+        weight: isSelected ? 3 : 2,
+        fillOpacity: isSelected ? 0.25 : isLoading ? 0.2 : isUnloaded ? 0.1 : 0.15,
+      });
     }
-  }, [selectedShapeId, shapes, localStates]);
+  }, [selectedShapeId, shapes, localStates, playlists]);
 
   // ── Falloff halos for every shape ───────────────────────────────
   // Visualizes each shape's audio falloff as a dashed outline at the falloff
