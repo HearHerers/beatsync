@@ -106,13 +106,19 @@ export const handleStreamMusic: HandlerFunction<ExtractWSRequestFrom["STREAM_MUS
     // playlist), append to that context. Otherwise fall back to the room-wide
     // audioSources list (audio rooms / main playlist). Mirrors upload.ts.
     const contextId = message.contextId;
+    // Provider metadata knows the track length up front — stamp it so
+    // beatgrid matching can duration-verify without waiting for a decode.
+    const newTrack = {
+      url: r2Url,
+      ...(message.trackDurationSec !== undefined && { durationSec: message.trackDurationSec }),
+    };
     if (contextId !== undefined) {
-      const tracks = room.addTrackToContext(contextId, { url: r2Url });
+      const tracks = room.addTrackToContext(contextId, newTrack);
       if (!tracks) {
         console.error(`Stream request: playlist context "${contextId}" not found in room ${roomId}`);
       }
     } else {
-      const sources = room.addAudioSource({ url: r2Url });
+      const sources = room.addAudioSource(newTrack);
       console.log(`Broadcasting new audio sources to room ${roomId}: ${sources.length} total sources`);
       sendBroadcast({
         server,

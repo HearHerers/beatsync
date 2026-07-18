@@ -91,6 +91,9 @@ export function SearchResults({ className, onTrackSelect, contextId }: SearchRes
           type: ClientActionEnum.enum.STREAM_MUSIC,
           trackId: track.id,
           trackName: formattedTrackName,
+          // Provider-reported length: lets the server duration-verify beatgrid
+          // matches for the stored track without waiting for a client decode.
+          ...(track.duration > 0 && { trackDurationSec: track.duration }),
           contextId,
         },
       });
@@ -112,6 +115,9 @@ export function SearchResults({ className, onTrackSelect, contextId }: SearchRes
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
+
+  // Whole BPMs stay bare; fractional grids keep one decimal.
+  const formatBpm = (bpm: number) => `${Number.isInteger(bpm) ? bpm : bpm.toFixed(1)} BPM`;
 
   if (isSearching) {
     return (
@@ -351,6 +357,14 @@ export function SearchResults({ className, onTrackSelect, contextId }: SearchRes
                 </h4>
                 <p className="text-xs text-neutral-400 truncate">{track.performer.name}</p>
               </div>
+
+              {/* Beatgrid hint: the server's Rekordbox index recognized this
+                  track, so it can beat-match once added */}
+              {track.beatgrid && (
+                <div className="flex-shrink-0 text-[10px] font-medium text-emerald-400/90 bg-emerald-400/10 rounded px-1.5 py-0.5">
+                  {formatBpm(track.beatgrid.bpm)}
+                </div>
+              )}
 
               {/* Duration */}
               <div className="text-xs text-neutral-500 group-hover:text-neutral-400 transition-colors">

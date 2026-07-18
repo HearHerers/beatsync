@@ -259,11 +259,15 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
 
         if (scheduledAction.type === "PLAY") {
           if (scheduledAction.contextId) {
+            // playbackRate rides on SYNC_ZONES reschedules and rate-preserving
+            // resumes; absent means normal speed (and resets any prior sync rate).
+            const playbackRate = scheduledAction.playbackRate ?? 1;
             mapAudio.playShape(
               scheduledAction.contextId,
               scheduledAction.audioSource,
               scheduledAction.trackTimeSeconds,
-              serverTimeToExecute
+              serverTimeToExecute,
+              playbackRate
             );
             // Mirror the playing state into the client's playlists map so the
             // UI (Queue selection, EnsembleControls counter) updates.
@@ -272,6 +276,7 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
               audioSource: scheduledAction.audioSource,
               serverTimeToExecute,
               trackPositionSeconds: scheduledAction.trackTimeSeconds,
+              playbackRate,
             });
           } else {
             schedulePlay({
@@ -283,9 +288,15 @@ export const WebSocketManager = ({ roomId, username, requestedRoomType }: WebSoc
         } else if (scheduledAction.type === "PAUSE") {
           if (scheduledAction.contextId) {
             mapAudio.pauseShape(scheduledAction.contextId);
+            // trackTimeSeconds carries the position captured at the shared pause
+            // instant (Pause All) — mirror it so the Resume All button can see
+            // which zones are resumable. Without it the mirror keeps the stale
+            // position from the last PLAY (0 for zones started from the top).
             useGlobalStore.getState().setContextPlayback(scheduledAction.contextId, {
               type: "paused",
               audioSource: scheduledAction.audioSource,
+              trackPositionSeconds: scheduledAction.trackTimeSeconds,
+              serverTimeToExecute,
             });
           } else {
             schedulePause({ targetServerTime: serverTimeToExecute });

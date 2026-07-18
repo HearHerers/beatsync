@@ -8,6 +8,7 @@ const pausedState = {
   trackIndex: 0,
   serverTimeToExecute: 0,
   trackPositionSeconds: 0,
+  playbackRate: 1,
 };
 
 const baseRoom: RoomBackupType = {

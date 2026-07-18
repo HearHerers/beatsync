@@ -1,6 +1,8 @@
 import { ADMIN_SECRET, IS_DEMO_MODE } from "@/demo";
 import { validateR2Config } from "@/lib/r2";
+import { globalManager } from "@/managers";
 import { BackupManager } from "@/managers/BackupManager";
+import { getBeatgridIndex, loadBeatgridIndexFromEnv } from "@/managers/BeatgridIndex";
 import { getActiveRooms } from "@/routes/active";
 import { handleAdmin } from "@/routes/admin";
 import { handleGetDefaultAudio } from "@/routes/default";
@@ -22,6 +24,10 @@ const r2Valid = !IS_DEMO_MODE && validateR2Config().isValid;
 // could connect during the async restore window and hit a not-yet-restored
 // (empty) room — recreating it fresh and clobbering durable state. Rooms are
 // permanent, so getting this right matters.
+// Load the Rekordbox beatgrid index (REKORDBOX_BEATGRIDS_PATH; fail-open)
+// before restore so the post-restore backfill below has it.
+loadBeatgridIndexFromEnv();
+
 if (r2Valid) {
   try {
     await BackupManager.restoreState();
@@ -30,6 +36,27 @@ if (r2Valid) {
   }
 } else if (!IS_DEMO_MODE) {
   console.log("ℹ️  R2 not configured; skipping state restore (state will not persist).");
+}
+
+// Backfill beatgrids onto restored tracks. Restore sets playlists directly
+// (restorePlaylists), bypassing addTrackToContext's auto-attach hook — without
+// this sweep, everything already in rooms at boot would stay ungridded. Runs
+// before listen, so no client can observe the pre-backfill state.
+if (getBeatgridIndex().size > 0) {
+  let changedTracks = 0;
+  let changedRooms = 0;
+  globalManager.forEachRoom((room) => {
+    const n = room.backfillBeatgrids();
+    if (n > 0) {
+      changedTracks += n;
+      changedRooms++;
+    }
+  });
+  if (changedTracks > 0) {
+    console.log(
+      `🎚️  Beatgrid backfill: attached/updated ${changedTracks} track entr(ies) across ${changedRooms} room(s).`
+    );
+  }
 }
 
 // Bun.serve with WebSocket support
@@ -47,7 +74,7 @@ const server = Bun.serve<WSData>({
     try {
       // Operator surface (fail-closed 404 without OPERATOR_SECRET; no CORS).
       if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) {
-        return await handleAdmin(req, url);
+        return await handleAdmin(req, url, server);
       }
 
       // Demo mode: serve local audio files

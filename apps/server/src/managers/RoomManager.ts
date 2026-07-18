@@ -1,6 +1,8 @@
 import { calculateScheduleTimeMs, DEFAULT_CLIENT_RTT_MS } from "@/config";
 import { IS_DEMO_MODE } from "@/demo";
 import { deleteObjectsWithPrefix } from "@/lib/r2";
+import { computeZoneSync } from "@/lib/zoneSync";
+import { getBeatgridIndex, type BeatgridIndex } from "@/managers/BeatgridIndex";
 import { ChatManager } from "@/managers/ChatManager";
 import { calculateGainFromDistanceToSource } from "@/spatial";
 import { debounce } from "@/utils/debounce";
@@ -9,6 +11,8 @@ import { positionClientsInCircle } from "@/utils/spatial";
 import type { BunServer, WSData } from "@/utils/websocket";
 import type {
   AudioSourceType,
+  BeatgridSourceType,
+  BeatgridType,
   ChatMessageType,
   ClientDataType,
   DiscoveryRoomType,
@@ -27,6 +31,7 @@ import type {
   WSBroadcastType,
 } from "@beatsync/shared";
 import {
+  beatgridsEqual,
   ChatMessageSchema,
   ClientDataSchema,
   epochNow,
@@ -163,6 +168,7 @@ const INITIAL_PLAYLIST_PLAYBACK: PlaylistPlaybackState = {
   trackIndex: 0,
   serverTimeToExecute: 0,
   trackPositionSeconds: 0,
+  playbackRate: 1,
 };
 
 interface PendingPlayState {
@@ -222,6 +228,7 @@ export class RoomManager {
       audioSource: p.audioSource,
       serverTimeToExecute: p.serverTimeToExecute,
       trackPositionSeconds: p.trackPositionSeconds,
+      playbackRate: p.playbackRate,
     };
   }
   private set playbackState(value: RoomPlaybackState) {
@@ -232,6 +239,7 @@ export class RoomManager {
       audioSource: value.audioSource,
       serverTimeToExecute: value.serverTimeToExecute,
       trackPositionSeconds: value.trackPositionSeconds,
+      playbackRate: value.playbackRate,
     };
   }
 
@@ -529,7 +537,7 @@ export class RoomManager {
    * trackTimeSeconds=0 so they all phase-lock to the shared serverTimeToExecute.
    * Optional contextIds filter restricts to a subset.
    */
-  buildPlayAllActions(contextIds?: string[]): PlayActionType[] {
+  buildPlayAllActions(contextIds?: string[], opts: { resume?: boolean } = {}): PlayActionType[] {
     const filter = contextIds && contextIds.length > 0 ? new Set(contextIds) : undefined;
     const actions: PlayActionType[] = [];
     for (const playlist of this.playlists.values()) {
@@ -539,15 +547,26 @@ export class RoomManager {
       if (this.isMapRoom() && playlist.id === MAIN_CONTEXT_ID) continue;
       if (filter && !filter.has(playlist.id)) continue;
       if (playlist.tracks.length === 0) continue;
+      // Resume mode never restarts a context that's already running.
+      if (opts.resume && playlist.playback.type === "playing") continue;
       const candidate = playlist.playback.audioSource || playlist.tracks[0].url;
       // Resilience: if the recorded audioSource has since been removed, fall back
       // to the first remaining track. Skip the context only if it's truly empty.
       const audioSource = playlist.tracks.some((t) => t.url === candidate) ? candidate : playlist.tracks[0]?.url;
       if (!audioSource) continue;
+      // Resume: pick up from the position captured by PAUSE_ALL (static while
+      // paused, so build-time computation is safe) at the preserved tempo-sync
+      // rate — restarting all zones at one shared instant keeps their relative
+      // phase (and any beat-sync lock) intact. Positions only resume for the
+      // track they were captured on; a swapped/removed track starts at 0.
+      const resumingSameTrack = opts.resume && audioSource === playlist.playback.audioSource;
+      const trackTimeSeconds = resumingSameTrack ? playlist.playback.trackPositionSeconds : 0;
+      const playbackRate = resumingSameTrack ? playlist.playback.playbackRate : 1;
       actions.push({
         type: "PLAY",
         audioSource,
-        trackTimeSeconds: 0,
+        trackTimeSeconds,
+        ...(playbackRate !== 1 && { playbackRate }),
         ...(playlist.id !== MAIN_CONTEXT_ID && { contextId: playlist.id }),
       });
     }
@@ -556,8 +575,10 @@ export class RoomManager {
 
   /**
    * Enumerate the pause actions that "Stop All" should fire — one per currently
-   * playing playlist context. Matches the existing per-context EnsembleControls
-   * semantic of resetting trackTimeSeconds to 0 on pause.
+   * playing playlist context. trackTimeSeconds here is a placeholder; the real
+   * position is captured in broadcastPauseAll at the shared execute time so
+   * every zone's position freezes at the same instant (which is what lets
+   * RESUME preserve relative phase between zones).
    */
   buildPauseAllActions(contextIds?: string[]): PauseActionType[] {
     const filter = contextIds && contextIds.length > 0 ? new Set(contextIds) : undefined;
@@ -748,12 +769,24 @@ export class RoomManager {
    * Pause every supplied context with one shared serverTimeToExecute. No load
    * handshake required — pause is fire-and-forget once the audio is already
    * scheduled.
+   *
+   * Each context's trackTimeSeconds is captured HERE, at the shared execute
+   * time (rate-aware: a tempo-synced zone's position advances at rate ×
+   * wall-clock). Freezing every zone at the same instant is what allows
+   * PLAY_ALL_CONTEXTS{resume} to restart them with relative phase — including
+   * beat-sync lock — preserved.
    */
   broadcastPauseAll(pauseActions: PauseActionType[], server: BunServer): void {
     if (pauseActions.length === 0) return;
     const serverTimeToExecute = this.getScheduledExecutionTime();
     let scheduled = 0;
     for (const pa of pauseActions) {
+      const ctxId = pa.contextId ?? MAIN_CONTEXT_ID;
+      const playback = this.playlists.get(ctxId)?.playback;
+      if (playback?.type === "playing" && pa.audioSource === playback.audioSource) {
+        const elapsedMs = serverTimeToExecute - playback.serverTimeToExecute;
+        pa.trackTimeSeconds = Math.max(0, playback.trackPositionSeconds + (playback.playbackRate * elapsedMs) / 1000);
+      }
       const success = this.updatePlaybackSchedulePause(pa, serverTimeToExecute);
       if (!success) continue;
       sendBroadcast({
@@ -920,8 +953,20 @@ export class RoomManager {
    * Add an audio source to the room
    */
   addAudioSource(source: AudioSourceType): AudioSourceType[] {
-    this.audioSources.push(source);
+    this.audioSources.push(this.withAutoBeatgrid(source));
     return this.audioSources;
+  }
+
+  /**
+   * Fill in a beatgrid from the server's Rekordbox index when the source has
+   * none (see BEATGRID_AUTOLOAD_PLAN.md). No-op when the track is already
+   * gridded or the collection has no unambiguous entry for it.
+   */
+  private withAutoBeatgrid(source: AudioSourceType): AudioSourceType {
+    if (source.beatgrid) return source;
+    const hit = getBeatgridIndex().gridForUrl(source.url, source.durationSec);
+    if (!hit) return source;
+    return { ...source, beatgrid: hit.beatgrid, beatgridSource: "auto" };
   }
 
   // Set all audio sources (used in backup restoration)
@@ -1362,6 +1407,7 @@ export class RoomManager {
           trackIndex: playlist.playback.trackIndex,
           trackPositionSeconds: 0,
           serverTimeToExecute,
+          playbackRate: 1,
         };
         return false;
       }
@@ -1376,6 +1422,8 @@ export class RoomManager {
       trackIndex: trackIndex === -1 ? playlist.playback.trackIndex : trackIndex,
       trackPositionSeconds: pauseSchema.trackTimeSeconds,
       serverTimeToExecute,
+      // Preserve the tempo-sync rate across pause so resume plays at the same speed.
+      playbackRate: playlist.playback.playbackRate,
     };
     return true;
   }
@@ -1403,6 +1451,9 @@ export class RoomManager {
       trackIndex,
       trackPositionSeconds: playSchema.trackTimeSeconds,
       serverTimeToExecute,
+      // Normal plays (no playbackRate in the action) reset tempo-sync to 1;
+      // SYNC_ZONES sets it explicitly.
+      playbackRate: playSchema.playbackRate ?? 1,
     };
     return true;
   }
@@ -1429,6 +1480,7 @@ export class RoomManager {
   private sendResumePlayForContext(ws: ServerWebSocket<WSData>, playlist: PlaylistRuntime): void {
     const serverTimeWhenStarted = playlist.playback.serverTimeToExecute;
     const trackPositionWhenStarted = playlist.playback.trackPositionSeconds;
+    const playbackRate = playlist.playback.playbackRate;
     const now = epochNow();
 
     // Use dynamic scheduling based on max client RTT
@@ -1438,12 +1490,14 @@ export class RoomManager {
 
     const timeElapsedSinceStart = now - serverTimeWhenStarted;
     const timeElapsedAtExecution = serverTimeToExecute - serverTimeWhenStarted;
-    const resumeTrackTimeSeconds = trackPositionWhenStarted + timeElapsedAtExecution / 1000;
+    // Buffer position advances at playbackRate × wall-clock (tempo-synced zones).
+    const resumeTrackTimeSeconds = trackPositionWhenStarted + (playbackRate * timeElapsedAtExecution) / 1000;
 
     console.log(
       `Resuming ctx=${playlist.id} on client ${ws.data.clientId}: track started at ` +
         `${trackPositionWhenStarted.toFixed(2)}s, ${(timeElapsedSinceStart / 1000).toFixed(2)}s elapsed, ` +
-        `will be at ${resumeTrackTimeSeconds.toFixed(2)}s when client starts`
+        `will be at ${resumeTrackTimeSeconds.toFixed(2)}s when client starts` +
+        (playbackRate !== 1 ? ` (rate ${playbackRate.toFixed(4)})` : "")
     );
 
     sendUnicast({
@@ -1455,6 +1509,7 @@ export class RoomManager {
           audioSource: playlist.playback.audioSource,
           trackTimeSeconds: resumeTrackTimeSeconds,
           ...(playlist.id !== MAIN_CONTEXT_ID && { contextId: playlist.id }),
+          ...(playbackRate !== 1 && { playbackRate }),
         },
         serverTimeToExecute,
       },
@@ -1832,6 +1887,163 @@ export class RoomManager {
   }
 
   /**
+   * Attach a beatgrid to every occurrence of a track URL across all contexts —
+   * the grid is a property of the audio file, not of any one zone. Returns how
+   * many track entries were updated (0 = URL not in this room). `source`
+   * defaults to "manual" (curator import); backfills never overwrite those.
+   */
+  setTrackBeatgrid(url: string, beatgrid: BeatgridType, source: BeatgridSourceType = "manual"): number {
+    let updated = 0;
+    for (const playlist of this.playlists.values()) {
+      playlist.tracks = playlist.tracks.map((t) => {
+        if (t.url !== url) return t;
+        updated++;
+        return { ...t, beatgrid, beatgridSource: source };
+      });
+    }
+    return updated;
+  }
+
+  /**
+   * Sweep every playlist and reconcile track grids against the current
+   * BeatgridIndex: ungridded tracks get a grid, "auto" grids the index now
+   * disagrees with are corrected (re-analysis in Rekordbox propagates), and
+   * manual grids — including pre-provenance ones with no beatgridSource — are
+   * never touched. Tracks absent from the index keep whatever they have.
+   *
+   * Runs after startup restore (restorePlaylists bypasses addTrackToContext,
+   * so restored tracks never hit the auto-attach hook) and after an operator
+   * beatgrid reload. Returns how many track entries changed.
+   */
+  backfillBeatgrids(): number {
+    const index = getBeatgridIndex();
+    if (index.size === 0) return 0;
+    let changed = 0;
+    for (const playlist of this.playlists.values()) {
+      playlist.tracks = playlist.tracks.map((t) => {
+        const updated = this.reconcileTrackBeatgrid(t, index);
+        if (!updated) return t;
+        changed++;
+        return updated;
+      });
+    }
+    return changed;
+  }
+
+  /**
+   * Reconcile one track's grid against the beatgrid index (duration-aware —
+   * see BeatgridIndex.gridForUrl). Returns the updated track, or null when
+   * nothing changes. Manual grids — including pre-provenance ones with no
+   * beatgridSource — are never touched. An "auto" grid whose exact-name entry
+   * is contradicted by the real duration (and has no fallback winner) is
+   * DETACHED: evidence says it belongs to a different version of the track.
+   * Mere absence from the index keeps whatever the track has (conservative).
+   */
+  private reconcileTrackBeatgrid(t: AudioSourceType, index: BeatgridIndex): AudioSourceType | null {
+    if (t.beatgrid && t.beatgridSource !== "auto") return null; // manual/legacy: never touched
+    const hit = index.gridForUrl(t.url, t.durationSec);
+    if (!hit) {
+      if (t.beatgrid && t.durationSec !== undefined && index.durationConflict(t.url, t.durationSec)) {
+        return { ...t, beatgrid: undefined, beatgridSource: undefined };
+      }
+      return null;
+    }
+    if (t.beatgrid && beatgridsEqual(t.beatgrid, hit.beatgrid)) return null;
+    return { ...t, beatgrid: hit.beatgrid, beatgridSource: "auto" };
+  }
+
+  /**
+   * Record the real audio duration for every copy of a track URL (a property
+   * of the audio file, like the grid), then reconcile those copies against
+   * the beatgrid index — a newly learned duration can attach a grid (the
+   * duration+loose-title fallback tier), correct one, or detach a
+   * wrong-version name match. Returns how many track entries changed
+   * (duration and/or grid); 0 means nothing to broadcast.
+   *
+   * Fires on every client's AUDIO_SOURCE_LOADED, so it must be idempotent:
+   * the stamp is skipped when the stored duration is within 0.5 s (decoder
+   * padding differs slightly across browsers; grid tolerances are coarser).
+   */
+  setTrackDuration(url: string, durationSec: number): number {
+    const rounded = Math.round(durationSec * 100) / 100;
+    const index = getBeatgridIndex();
+    let changed = 0;
+    for (const playlist of this.playlists.values()) {
+      playlist.tracks = playlist.tracks.map((t) => {
+        if (t.url !== url) return t;
+        let next = t;
+        if (t.durationSec === undefined || Math.abs(t.durationSec - rounded) > 0.5) {
+          next = { ...next, durationSec: rounded };
+        }
+        if (index.size > 0) {
+          const reconciled = this.reconcileTrackBeatgrid(next, index);
+          if (reconciled) next = reconciled;
+        }
+        if (next === t) return t;
+        changed++;
+        return next;
+      });
+    }
+    return changed;
+  }
+
+  /**
+   * Beat-match the follower zone to the master zone (one-shot, CDJ-style).
+   * Validates preconditions, computes the anchor + rate via computeZoneSync,
+   * and updates the follower's authoritative playback state. Returns the PLAY
+   * scheduling parameters for the handler to broadcast, or an Error naming the
+   * unmet precondition (both zones playing, both current tracks gridded).
+   * The master is never touched.
+   */
+  syncZones(
+    masterContextId: string,
+    followerContextId: string
+  ): { anchorServerTime: number; followerRate: number; followerTrackTimeSeconds: number; audioSource: string } | Error {
+    if (masterContextId === followerContextId) return new Error("master and follower must differ");
+    const master = this.playlists.get(masterContextId);
+    const follower = this.playlists.get(followerContextId);
+    if (!master || !follower) return new Error("unknown context");
+    if (master.playback.type !== "playing" || follower.playback.type !== "playing")
+      return new Error("both zones must be playing");
+
+    const masterTrack = master.tracks.find((t) => t.url === master.playback.audioSource);
+    const followerTrack = follower.tracks.find((t) => t.url === follower.playback.audioSource);
+    if (!masterTrack?.beatgrid) return new Error("master track has no beatgrid");
+    if (!followerTrack?.beatgrid) return new Error("follower track has no beatgrid");
+
+    const result = computeZoneSync(
+      {
+        positionSeconds: master.playback.trackPositionSeconds,
+        atServerTime: master.playback.serverTimeToExecute,
+        playbackRate: master.playback.playbackRate,
+        beatgrid: masterTrack.beatgrid,
+      },
+      {
+        positionSeconds: follower.playback.trackPositionSeconds,
+        atServerTime: follower.playback.serverTimeToExecute,
+        playbackRate: follower.playback.playbackRate,
+        beatgrid: followerTrack.beatgrid,
+      },
+      this.getScheduledExecutionTime()
+    );
+
+    follower.playback = {
+      ...follower.playback,
+      trackPositionSeconds: result.followerTrackTimeSeconds,
+      serverTimeToExecute: result.anchorServerTime,
+      playbackRate: result.followerRate,
+    };
+
+    console.log(
+      `SYNC_ZONES in ${this.roomId}: ${followerContextId} → ${masterContextId} | ` +
+        `rate=${result.followerRate.toFixed(4)} anchor=+${(result.anchorServerTime - epochNow()).toFixed(0)}ms ` +
+        `followerPos=${result.followerTrackTimeSeconds.toFixed(3)}s masterPos=${result.masterTrackTimeSeconds.toFixed(3)}s`
+    );
+
+    return { ...result, audioSource: follower.playback.audioSource };
+  }
+
+  /**
    * Append a track to a specific context's playlist. Returns the updated tracks
    * array, or undefined if the playlist doesn't exist (e.g. stale message for
    * a deleted shape).
@@ -1839,16 +2051,33 @@ export class RoomManager {
   addTrackToContext(contextId: string, source: AudioSourceType): AudioSourceType[] | undefined {
     const playlist = this.playlists.get(contextId);
     if (!playlist) return undefined;
+    // Beatgrid is a property of the audio file, not one occurrence. If this URL
+    // already has a grid on some other copy (e.g. imported onto the Room Pool
+    // copy before it was assigned to any zone), inherit it so the new zone
+    // track keeps its BPM and stays beat-sync-eligible. Without this, adding a
+    // gridded pool track to a zone would silently drop the grid.
+    let toAdd = source;
+    if (!toAdd.beatgrid) {
+      for (const pl of this.playlists.values()) {
+        const existing = pl.tracks.find((t) => t.url === source.url && t.beatgrid);
+        if (existing?.beatgrid) {
+          toAdd = { ...source, beatgrid: existing.beatgrid, beatgridSource: existing.beatgridSource };
+          break;
+        }
+      }
+    }
+    // Still ungridded: consult the server's Rekordbox beatgrid index.
+    toAdd = this.withAutoBeatgrid(toAdd);
     // De-duplicate by URL — re-adding an existing source is a no-op.
     if (!playlist.tracks.some((t) => t.url === source.url)) {
-      playlist.tracks = [...playlist.tracks, source];
+      playlist.tracks = [...playlist.tracks, toAdd];
     }
     // Pool invariant: the main context (Room Pool) is a superset of every
     // zone's tracks — anything added to a zone is also registered in the pool,
     // which is the single place a track is permanently deleted from. The
     // contextId guard keeps the recursion one level deep.
     if (contextId !== MAIN_CONTEXT_ID) {
-      this.addTrackToContext(MAIN_CONTEXT_ID, source);
+      this.addTrackToContext(MAIN_CONTEXT_ID, toAdd);
     }
     return playlist.tracks;
   }

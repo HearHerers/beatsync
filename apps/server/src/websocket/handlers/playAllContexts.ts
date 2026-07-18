@@ -9,7 +9,7 @@ export const handlePlayAllContexts: HandlerFunction<ExtractWSRequestFrom["PLAY_A
   server,
 }) => {
   const { room } = requireCanMutate(ws);
-  const playActions = room.buildPlayAllActions(message.contextIds);
+  const playActions = room.buildPlayAllActions(message.contextIds, { resume: message.resume });
   if (playActions.length === 0) {
     console.log(`Room ${ws.data.roomId}: PLAY_ALL_CONTEXTS — no eligible contexts`);
     return;

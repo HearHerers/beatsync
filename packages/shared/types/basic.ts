@@ -40,8 +40,43 @@ export type MapMetadataType = z.infer<typeof MapMetadataSchema>;
 export const MapTileLayerIdEnum = z.enum(["mapbox", "esri", "michigan", "street"]);
 export type MapTileLayerId = z.infer<typeof MapTileLayerIdEnum>;
 
+/**
+ * Compact constant-tempo beatgrid for a track, extracted from DJ software
+ * (see rekordbox-integration/). Sufficient for quantized electronic music:
+ * beat k lands at firstDownbeatSec + k·60/bpm. Tracks whose grid is dynamic
+ * (multiple tempos) are not representable here and stay un-synced in v1.
+ */
+export const BeatgridSchema = z.object({
+  bpm: z.number().positive(),
+  /** Seconds into the track of the first gridded beat (any beat-in-bar). */
+  firstBeatSec: z.number().min(0),
+  /** Seconds into the track of the first downbeat (beat 1 of a bar). */
+  firstDownbeatSec: z.number().min(0),
+  beatsPerBar: z.number().int().positive().default(4),
+});
+export type BeatgridType = z.infer<typeof BeatgridSchema>;
+
+/**
+ * Where a track's beatgrid came from. "manual" = imported by a curator
+ * (SET_TRACK_BEATGRID); "auto" = attached by the server's BeatgridIndex.
+ * Reload backfills may correct "auto" grids but never touch "manual" ones —
+ * a grid with no source predates provenance and is treated as manual.
+ */
+export const BeatgridSourceEnum = z.enum(["auto", "manual"]);
+export type BeatgridSourceType = z.infer<typeof BeatgridSourceEnum>;
+
 export const AudioSourceSchema = z.object({
   url: z.string(),
+  /** Present once beatgrid data is attached (curator import or server autoload). */
+  beatgrid: BeatgridSchema.optional(),
+  beatgridSource: BeatgridSourceEnum.optional(),
+  /**
+   * Real audio length in seconds, when known: reported by the first client to
+   * decode the file (AUDIO_SOURCE_LOADED) or from provider metadata at stream
+   * time. Used to verify beatgrid matches (wrong-version guard) and to enable
+   * the duration+loose-title fallback match tier.
+   */
+  durationSec: z.number().positive().optional(),
 });
 export type AudioSourceType = z.infer<typeof AudioSourceSchema>;
 

@@ -30,6 +30,7 @@ import { handlePauseAllContexts } from "@/websocket/handlers/pauseAllContexts";
 import { handlePlayAllContexts } from "@/websocket/handlers/playAllContexts";
 import { handleSetRoomName } from "@/websocket/handlers/setRoomName";
 import { handleSetUsername } from "@/websocket/handlers/setUsername";
+import { handleSetTrackBeatgrid, handleSyncZones } from "@/websocket/handlers/zoneSync";
 import { handleSync } from "@/websocket/handlers/sync";
 import {
   handleAddShape,
@@ -150,6 +151,14 @@ export const WS_REGISTRY: WebsocketRegistry = {
   [ClientActionEnum.enum.SET_CONTEXT_LOOP]: {
     handle: handleSetContextLoop,
     description: "Toggle the loop flag for a playlist context",
+  },
+  [ClientActionEnum.enum.SET_TRACK_BEATGRID]: {
+    handle: handleSetTrackBeatgrid,
+    description: "Attach imported beatgrid data to a track (by URL)",
+  },
+  [ClientActionEnum.enum.SYNC_ZONES]: {
+    handle: handleSyncZones,
+    description: "Beat-match a follower zone to a master zone",
   },
   [ClientActionEnum.enum.ADD_TRACK_TO_CONTEXT]: {
     handle: handleAddTrackToContext,

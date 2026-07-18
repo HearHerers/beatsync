@@ -1,0 +1,8 @@
+pyrekordbox>=0.4.3
+# pip install "git+https://github.com/dylanljones/pyrekordbox.git@4db8bce" if >0.4.4 is needed for Rekordbox6Database class was renamed to MasterDatabase
+numpy
+# Transitively required by pyrekordbox to unlock the SQLCipher master.db. Pinned
+# explicitly so a headless server build fails loudly if the wheel is unavailable.
+# NOTE: the "-wheels" variant bundles libsqlcipher (no system package needed);
+# plain "sqlcipher3" is a different package that must build against a system lib.
+sqlcipher3-wheels

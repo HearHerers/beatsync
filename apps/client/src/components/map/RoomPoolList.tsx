@@ -75,10 +75,15 @@ export const RoomPoolList = ({ canMutate }: RoomPoolListProps) => {
     for (const t of pl.tracks) zoneCountByUrl.set(t.url, (zoneCountByUrl.get(t.url) ?? 0) + 1);
   });
 
-  // Project pool tracks into AudioSourceState (loading/error state, when known,
-  // comes from the global registry) so they render through the shared row.
+  // Project pool tracks into AudioSourceState. Loading/error state, when known,
+  // comes from the global registry, but the `source` must come from the pool
+  // track `t` — it carries per-track metadata (e.g. beatgrid) that the global
+  // audioSources copy lacks, so the BPM badge renders. (Mirrors Queue.tsx.)
   const byUrl = new Map(audioSources.map((as) => [as.source.url, as]));
-  const items: AudioSourceState[] = tracks.map((t) => byUrl.get(t.url) ?? { source: t, status: "idle" });
+  const items: AudioSourceState[] = tracks.map((t) => {
+    const registered = byUrl.get(t.url);
+    return registered ? { ...registered, source: t } : { source: t, status: "idle" };
+  });
 
   const send = (req: Parameters<typeof sendWSRequest>[0]["request"]) => {
     const socket = useGlobalStore.getState().socket;
