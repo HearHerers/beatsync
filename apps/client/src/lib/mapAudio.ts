@@ -376,9 +376,12 @@ function unloadShape(shapeId: string): void {
 function replayPendingPlay(shapeId: string): void {
   const chain = chains.get(shapeId);
   if (!chain?.pendingPlay) return;
-  const { audioSource, trackTimeSeconds, targetServerTime } = chain.pendingPlay;
+  // Carry playbackRate through the replay — dropping it here reset beat-synced
+  // zones (rate ≠ 1) to normal speed when a play resumed via the NTP or
+  // autoplay-unlock gates.
+  const { audioSource, trackTimeSeconds, targetServerTime, playbackRate } = chain.pendingPlay;
   chain.pendingPlay = undefined;
-  playShape(shapeId, audioSource, trackTimeSeconds, targetServerTime);
+  playShape(shapeId, audioSource, trackTimeSeconds, targetServerTime, playbackRate);
 }
 
 /**
