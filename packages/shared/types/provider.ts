@@ -68,6 +68,10 @@ export const TrackSchema = z.object({
   // Opaque track ID. String to accommodate Navidrome/Subsonic hash IDs as well
   // as numeric provider IDs (coerced to string by the provider adapter).
   id: z.string(),
+  // Search-time hint that the server's beatgrid index (REKORDBOX_BEATGRIDS_PATH)
+  // recognizes this track, so it can beat-match once added. Display only — the
+  // authoritative grid attaches when the track enters a room.
+  beatgrid: z.object({ bpm: z.number().positive() }).optional(),
 });
 export type TrackType = z.infer<typeof TrackSchema>;
 
