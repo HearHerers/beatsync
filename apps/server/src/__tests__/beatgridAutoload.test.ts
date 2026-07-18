@@ -230,11 +230,71 @@ describe("duration verification + fallback tier", () => {
     expect(index.gridForUrl(url, 300)).toBeUndefined();
   });
 
-  it("refuses the fallback when more than one candidate survives", () => {
-    const vip = { ...RADIO, file: "Anthem (VIP).mp3", title: "Anthem (VIP)", durationSec: 210.5 };
+  it("refuses the fallback when multiple non-equivalent candidates survive without a duration margin", () => {
+    // Different grid (downbeat 150ms away) and only 0.5s apart in duration —
+    // neither grid equivalence nor the duration margin can pick one.
+    const vip = {
+      ...RADIO,
+      file: "Anthem (VIP).mp3",
+      title: "Anthem (VIP)",
+      durationSec: 210.5,
+      firstBeatSec: 0.25,
+      firstDownbeatSec: 0.25,
+    };
     const index = new BeatgridIndex({ beatsyncBeatgrids: 1, tracks: [RADIO, vip] });
     // Both entries are ~210s and both stripped titles ("anthem") are contained.
     expect(index.gridForUrl(r2Url("Some Anthem Bootleg"), 210.3)).toBeUndefined();
+  });
+
+  it("matches a duplicate-rip pair immediately when the grids are interchangeable", () => {
+    // Same audio in the collection twice under different filenames: the
+    // shared "artist - title" key has two owners with equivalent grids — any
+    // one of them works, no duration needed.
+    const dupe = { ...RADIO, file: "1-01 Anthem.mp3", bpm: 128.01, durationSec: 211 };
+    const index = new BeatgridIndex({ beatsyncBeatgrids: 1, tracks: [RADIO, dupe] });
+    expect(index.gridForUrl(r2Url("DJ X - Anthem"))?.beatgrid.firstBeatSec).toBe(0.1);
+  });
+
+  it("resolves the Bump Talkin case: two rips sharing metadata keys, settled by duration", () => {
+    // Real collection data: album rip (309s) + vinyl rip (308s, downbeat
+    // 111ms later). The Navidrome display name only matches the shared
+    // "paul johnson - bump talkin" key — previously discarded as ambiguous.
+    const albumRip = {
+      file: "06 - Bump Talkin.flac",
+      title: "Bump Talkin",
+      artist: "Paul Johnson",
+      bpm: 132.4,
+      durationSec: 309,
+      firstBeatSec: 0.004,
+      firstDownbeatSec: 0.004,
+      beatsPerBar: 4,
+      grid: "constant" as const,
+    };
+    const vinylRip = {
+      ...albumRip,
+      file: "C1 - Bump Talkin.flac",
+      bpm: 132.39,
+      durationSec: 308,
+      firstBeatSec: 0.115,
+      firstDownbeatSec: 0.115,
+    };
+    const index = new BeatgridIndex({ beatsyncBeatgrids: 1, tracks: [albumRip, vinylRip] });
+    const url = r2Url("Paul Johnson - Bump Talkin");
+
+    // Without a duration the two rips are indistinguishable — refuse.
+    expect(index.gridForUrl(url)).toBeUndefined();
+    // The provider-stamped duration picks the matching rip (1s margin).
+    expect(index.gridForUrl(url, 309)?.beatgrid.firstBeatSec).toBe(0.004);
+    expect(index.gridForUrl(url, 308.2)?.beatgrid.firstBeatSec).toBe(0.115);
+
+    // End-to-end: streamed track arrives with the provider duration.
+    setBeatgridIndex(index);
+    const room = new RoomManager("bump-talkin");
+    room.addPlaylist("zoneA", { loop: true });
+    room.addTrackToContext("zoneA", { url, durationSec: 309 });
+    const track = room.getPlaylist("zoneA")!.tracks[0];
+    expect(track.beatgrid?.bpm).toBe(132.4);
+    expect(track.beatgridSource).toBe("auto");
   });
 
   it("setTrackDuration stamps copies and attaches via the fallback tier", () => {

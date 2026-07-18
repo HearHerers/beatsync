@@ -23,6 +23,7 @@ import {
   looseNameTokens,
   looseTitleMatches,
   normalizeName,
+  resolveBeatgridCandidates,
   type BeatgridExportTrackType,
   type BeatgridExportType,
   type BeatgridType,
@@ -38,7 +39,7 @@ export interface BeatgridHit {
 }
 
 export class BeatgridIndex {
-  private readonly byKey: Map<string, BeatgridExportTrackType>;
+  private readonly byKey: Map<string, BeatgridExportTrackType[]>;
   /** All constant-grid entries — scanned by the duration fallback tier. */
   private readonly entries: BeatgridExportTrackType[];
   readonly tracks: number;
@@ -70,15 +71,16 @@ export class BeatgridIndex {
    * Grid for one of our audio URLs, or undefined if the collection has no
    * trustworthy entry for it. Two tiers:
    *
-   * 1. Exact key lookup on the normalized display name. When the real audio
-   *    duration is known AND the entry has one, a disagreement beyond
-   *    DURATION_VERIFY_TOLERANCE_SEC vetoes the match (same name, different
-   *    version — radio edit vs. extended mix) and falls through to tier 2,
-   *    which may find the right version.
+   * 1. Exact key lookup on the normalized display name. Entries whose export
+   *    duration disagrees with the real one beyond
+   *    DURATION_VERIFY_TOLERANCE_SEC are vetoed (same name, different
+   *    version); several survivors — a collection holding two rips of the
+   *    same track — go through resolveBeatgridCandidates (equivalent grids
+   *    are interchangeable, otherwise the real duration must clearly prefer
+   *    one).
    * 2. Duration + loose-title fallback (only when the real duration is
    *    known): entries within DURATION_FALLBACK_TOLERANCE_SEC whose title
-   *    tokens all appear in the display name. Exactly one survivor matches;
-   *    zero or several ⇒ no match (same ambiguity posture as exact keys).
+   *    tokens all appear in the display name, resolved the same way.
    */
   gridForUrl(url: string, durationSec?: number): BeatgridHit | undefined {
     let name: string;
@@ -88,8 +90,12 @@ export class BeatgridIndex {
       return undefined; // unparseable URL — not matchable
     }
 
-    const exact = this.byKey.get(name);
-    if (exact && !durationConflicts(exact, durationSec)) return toHit(exact);
+    const owners = this.byKey.get(name);
+    if (owners) {
+      const viable = owners.filter((e) => !durationConflicts(e, durationSec));
+      const resolved = resolveBeatgridCandidates(viable, durationSec);
+      if (resolved) return toHit(resolved);
+    }
 
     if (durationSec === undefined) return undefined;
     const roomTokens = new Set(looseNameTokens(name));
@@ -99,14 +105,16 @@ export class BeatgridIndex {
         Math.abs(e.durationSec - durationSec) <= DURATION_FALLBACK_TOLERANCE_SEC &&
         looseTitleMatches(e, roomTokens)
     );
-    return candidates.length === 1 ? toHit(candidates[0]) : undefined;
+    const resolved = resolveBeatgridCandidates(candidates, durationSec);
+    return resolved ? toHit(resolved) : undefined;
   }
 
   /**
-   * True when the URL's exact-key entry exists but its export duration
-   * disagrees with the given real duration — evidence that a grid matched by
-   * name alone is for a different version of the track. Used by backfill to
-   * DETACH such "auto" grids (mere absence from the index keeps them).
+   * True when the URL's exact key exists but EVERY owning entry's export
+   * duration disagrees with the given real duration — evidence that a grid
+   * matched by name alone is for a different version of the track. Used by
+   * backfill to DETACH such "auto" grids (mere absence from the index keeps
+   * them).
    */
   durationConflict(url: string, durationSec: number): boolean {
     let name: string;
@@ -115,8 +123,8 @@ export class BeatgridIndex {
     } catch {
       return false;
     }
-    const exact = this.byKey.get(name);
-    return exact !== undefined && durationConflicts(exact, durationSec);
+    const owners = this.byKey.get(name);
+    return owners !== undefined && owners.length > 0 && owners.every((e) => durationConflicts(e, durationSec));
   }
 }
 
@@ -208,6 +216,8 @@ function logIndexStats(index: BeatgridIndex, path: string): void {
   console.log(
     `🎚️  Beatgrid index loaded from ${path}: ${index.tracks} track(s), ${index.size} key(s)` +
       (index.skippedDynamic > 0 ? `, ${index.skippedDynamic} dynamic skipped` : "") +
-      (index.ambiguousKeys > 0 ? `, ${index.ambiguousKeys} ambiguous key(s) discarded` : "")
+      (index.ambiguousKeys > 0
+        ? `, ${index.ambiguousKeys} key(s) shared by multiple entries (resolved per-lookup)`
+        : "")
   );
 }

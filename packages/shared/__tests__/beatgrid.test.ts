@@ -11,6 +11,7 @@ import {
   looseTitleMatches,
   matchBeatgridsToTracks,
   normalizeName,
+  resolveBeatgridCandidates,
   sanitizeDisplayName,
   type BeatgridExportType,
 } from "../beatgrid";
@@ -165,24 +166,24 @@ describe("looseNameTokens / looseTitleMatches (duration-fallback tier)", () => {
 });
 
 describe("buildBeatgridKeyMap (server index shape)", () => {
-  it("indexes every unambiguous key of constant-grid entries", () => {
+  it("indexes every key of constant-grid entries", () => {
     const { byKey, tracks, skippedDynamic, ambiguousKeys } = buildBeatgridKeyMap(doc([HEAT3, BUMP]));
     expect(tracks).toBe(2);
     expect(skippedDynamic).toBe(0);
     expect(ambiguousKeys).toBe(0);
     // filename, artist-title, and title keys for each entry.
-    expect(byKey.get(normalizeName(HEAT3.file))?.bpm).toBe(123.0);
-    expect(byKey.get(normalizeName("Shinichi Atobe - Heat 3"))?.bpm).toBe(123.0);
-    expect(byKey.get(normalizeName("Bump Talkin"))?.bpm).toBe(132.4);
+    expect(byKey.get(normalizeName(HEAT3.file))?.[0].bpm).toBe(123.0);
+    expect(byKey.get(normalizeName("Shinichi Atobe - Heat 3"))?.[0].bpm).toBe(123.0);
+    expect(byKey.get(normalizeName("Bump Talkin"))?.[0].bpm).toBe(132.4);
   });
 
-  it("discards ambiguous keys but keeps each entry's unique keys", () => {
+  it("keeps multi-owner keys as candidate lists for lookup-time resolution", () => {
     const remix = { ...BUMP, file: "01 - Heat 3 (Remix).flac", title: "Heat 3", artist: "Someone Else" };
     const { byKey, ambiguousKeys } = buildBeatgridKeyMap(doc([HEAT3, remix]));
     expect(ambiguousKeys).toBe(1); // the shared bare title
-    expect(byKey.has(normalizeName("Heat 3"))).toBe(false);
-    expect(byKey.get(normalizeName("Shinichi Atobe - Heat 3"))?.bpm).toBe(123.0);
-    expect(byKey.get(normalizeName("Someone Else - Heat 3"))?.bpm).toBe(132.4);
+    expect(byKey.get(normalizeName("Heat 3"))).toHaveLength(2);
+    expect(byKey.get(normalizeName("Shinichi Atobe - Heat 3"))?.[0].bpm).toBe(123.0);
+    expect(byKey.get(normalizeName("Someone Else - Heat 3"))?.[0].bpm).toBe(132.4);
   });
 
   it("skips dynamic entries entirely", () => {
@@ -197,6 +198,38 @@ describe("buildBeatgridKeyMap (server index shape)", () => {
     const { byKey } = buildBeatgridKeyMap(doc([HEAT3]));
     const key = normalizeName(HEAT3.file);
     expect(byKey.get(key)).toBe(byKey.get(key));
-    expect(byKey.get(key)?.durationSec).toBe(577);
+    expect(byKey.get(key)?.[0].durationSec).toBe(577);
+  });
+});
+
+describe("resolveBeatgridCandidates", () => {
+  const RIP_A = { ...BUMP, file: "06 - Bump Talkin.flac", durationSec: 309 };
+  const RIP_B = {
+    ...BUMP,
+    file: "C1 - Bump Talkin.flac",
+    bpm: 132.39,
+    durationSec: 308,
+    firstBeatSec: 0.115,
+    firstDownbeatSec: 0.115,
+  };
+
+  it("treats equivalent grids as one entry (same audio ripped twice)", () => {
+    const dupe = { ...HEAT3, file: "copy of Heat 3.flac", bpm: 123.01, durationSec: 578 };
+    expect(resolveBeatgridCandidates([HEAT3, dupe])).toBe(HEAT3);
+    expect(resolveBeatgridCandidates([HEAT3, dupe], 577)).toBe(HEAT3);
+  });
+
+  it("resolves different versions by duration with a clear margin", () => {
+    // Two rips, downbeats 111ms apart — NOT interchangeable. Real duration
+    // 309 is 1s closer to RIP_A than RIP_B: clear winner.
+    expect(resolveBeatgridCandidates([RIP_A, RIP_B])).toBeUndefined(); // no duration → refuse
+    expect(resolveBeatgridCandidates([RIP_A, RIP_B], 309)).toBe(RIP_A);
+    expect(resolveBeatgridCandidates([RIP_A, RIP_B], 308.2)).toBe(RIP_B);
+    expect(resolveBeatgridCandidates([RIP_A, RIP_B], 308.5)).toBeUndefined(); // dead tie → refuse
+  });
+
+  it("refuses when any candidate has no export duration to rank", () => {
+    const unranked = { ...RIP_B, durationSec: undefined };
+    expect(resolveBeatgridCandidates([RIP_A, unranked], 309)).toBeUndefined();
   });
 });
