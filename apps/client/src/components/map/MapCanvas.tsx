@@ -505,11 +505,14 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     };
   }, [canMutate, myClientId]);
 
-  // Re-center when mapMetadata changes (curator hit "Set map view").
+  // Re-center when the room default view changes (admin hit "Set default map
+  // view", #64) — but only for NON-GPS users. A GPS user is anchored to their
+  // own location (#66/#74); the room default orients initial-load and manual
+  // users, and shouldn't yank someone away from where they physically are.
   useEffect(() => {
-    if (mapRef.current && mapMetadata) {
-      mapRef.current.setView(mapMetadata.center, mapMetadata.zoom);
-    }
+    if (!mapRef.current || !mapMetadata) return;
+    if (useMapStore.getState().locationMode === "gps") return;
+    mapRef.current.setView(mapMetadata.center, mapMetadata.zoom);
   }, [mapMetadata]);
 
   // Center on the user's own position when requested (#66 GPS-switch, #67 button,
