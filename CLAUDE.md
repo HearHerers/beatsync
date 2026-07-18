@@ -29,6 +29,7 @@ bun run room:info <id>   # Room detail: zones, playlists, clients (offline)
 bun run room:archive <id>    # Soft delete: evict + hide + reject joins; reversible
 bun run room:unarchive <id>  # Reverse an archive
 bun run room:delete <id> --yes  # HARD delete: purge state + R2 audio, tombstoned
+bun run room:duplicate <id> [newId]  # Structure-only copy (type, map config, shapes, name) into a new room; no playlists/audio/chat, fresh admin token on first join
 bun run rooms:purge --yes    # HARD delete EVERY room + all audio (incl. orphans)
 bun run room:import <roomId> <dir>  # Bulk-import local audio files into a room via the running server (--context <shapeId> for a zone, --dry-run to preview). For <shapeId> use a zone id from `bun run room:info <roomId>`.
 # The mutations call the running server's /admin API (OPERATOR_SECRET bearer).
@@ -129,6 +130,14 @@ S3_ACCESS_KEY_ID=
 S3_SECRET_ACCESS_KEY=
 OPERATOR_SECRET=        # optional; enables /admin/* (fail-closed 404 when unset) and rooms:list/room:info --sync
 REKORDBOX_BEATGRIDS_PATH=  # optional; extract_beatgrids.py --all output. Autoloads a beatgrid index at startup (fail-open when unset/missing): tracks entering rooms get grids auto-attached, restored rooms are backfilled after restore, and POST /admin/beatgrids/reload re-reads the file + backfills without a restart. Manual client imports (SET_TRACK_BEATGRID) are stamped "manual" and never overwritten by backfills. Navidrome search results the index recognizes also carry a display-only bpm hint (TrackSchema.beatgrid → BPM badge in the search UI).
+
+# Music provider search/streaming (all optional; provider disabled without PROVIDER_URL)
+PROVIDER_TYPE=          # qobuz (default) | navidrome
+PROVIDER_URL=
+NAVIDROME_USER=
+NAVIDROME_PASSWORD=
+NAVIDROME_STREAM_FORMAT=       # transcode target for streamed tracks; default mp3, "raw" = untouched original
+NAVIDROME_STREAM_MAX_BITRATE=  # default 320; ignored when format is raw
 ```
 
 ## Deployment

@@ -17,9 +17,12 @@ interface SearchResultsProps {
   /** When set, streamed tracks are added to this playlist context (e.g. a
    * shape.id in map rooms) rather than the room-wide "main" playlist. */
   contextId?: string;
+  /** Rendered in a single-scroll panel (no own scroll container). Drops the
+   * mobile height cap that would otherwise spill hidden content over siblings. */
+  inline?: boolean;
 }
 
-export function SearchResults({ className, onTrackSelect, contextId }: SearchResultsProps) {
+export function SearchResults({ className, onTrackSelect, contextId, inline = false }: SearchResultsProps) {
   const isMobile = useIsMobile();
   const searchResults = useGlobalStore((state) => state.searchResults);
   const isSearching = useGlobalStore((state) => state.isSearching);
@@ -300,7 +303,11 @@ export function SearchResults({ className, onTrackSelect, contextId }: SearchRes
   const tracks = searchResults.type === "success" ? searchResults.response.data.tracks.items : [];
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={cn(isMobile && "max-h-[40vh]", className)}>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className={cn(isMobile && !inline && "max-h-[40vh]", className)}
+    >
       <AnimatePresence>
         <div className="space-y-1">
           {tracks.map((track, index) => (

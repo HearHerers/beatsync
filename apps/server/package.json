@@ -16,6 +16,7 @@
     "room:archive": "bun run scripts/room-manage.ts archive",
     "room:unarchive": "bun run scripts/room-manage.ts unarchive",
     "room:delete": "bun run scripts/room-manage.ts delete",
+    "room:duplicate": "bun run scripts/room-manage.ts duplicate",
     "rooms:purge": "bun run scripts/room-manage.ts purge",
     "room:admin-token": "bun run scripts/room-admin-token.ts",
     "room:import": "bun run scripts/import-tracks.ts",

@@ -47,6 +47,11 @@ interface MapStateValues {
    *  is available, then clears the flag. Set on the GPS recenter button (#67)
    *  and when the first GPS fix arrives after switching to GPS mode (#66). */
   pendingRecenter: boolean;
+
+  /** Last view the user actually saw (updated on every moveend of the visible
+   *  canvas). Restores the view when MapCanvas remounts — e.g. the mobile Map
+   *  panel toggled off/on — instead of snapping back to the room default. */
+  lastView: { center: [number, number]; zoom: number } | null;
 }
 
 interface MapStoreActions {
@@ -68,6 +73,8 @@ interface MapStoreActions {
   /** MapCanvas calls this after it has performed the recenter. */
   consumeRecenter: () => void;
 
+  setLastView: (view: { center: [number, number]; zoom: number }) => void;
+
   reset: () => void;
 }
 
@@ -82,6 +89,7 @@ const initialState: MapStateValues = {
   defaultFalloffMeters: 25,
   selectedShapeId: null,
   pendingRecenter: false,
+  lastView: null,
 };
 
 export const useMapStore = create<MapState>()((set) => ({
@@ -138,6 +146,8 @@ export const useMapStore = create<MapState>()((set) => ({
 
   requestRecenter: () => set({ pendingRecenter: true }),
   consumeRecenter: () => set({ pendingRecenter: false }),
+
+  setLastView: (lastView) => set({ lastView }),
 
   reset: () =>
     set(() => ({

@@ -408,6 +408,11 @@ export const downloadBufferFromURL = async (data: {
   onProgress?: (loaded: number, total: number) => void;
 }) => {
   const response = await fetch(resolveAudioUrl(data.url));
+  if (!response.ok) {
+    // Without this check an error body (e.g. an S3 XML error page) flows into
+    // decodeAudioData and fails there as a misleading EncodingError.
+    throw new Error(`Audio download failed (HTTP ${response.status})`);
+  }
   const contentLength = Number(response.headers.get("content-length") ?? 0);
 
   let arrayBuffer: ArrayBuffer;

@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { FaGithub } from "react-icons/fa";
 import { SyncProgress } from "../ui/SyncProgress";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 
 interface TopBarProps {
   roomId: string;
@@ -47,39 +48,50 @@ export const TopBar = ({ roomId, panelControls }: TopBarProps) => {
           </Link>
 
           {/* NTP Measurements Indicator */}
-          <div className="items-center hidden md:flex">
-            <motion.svg width="14" height="14" viewBox="0 0 14 14" className="mr-1">
-              <circle
-                cx="7"
-                cy="7"
-                r="5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                className="text-neutral-600"
-              />
-              <motion.circle
-                cx="7"
-                cy="7"
-                r="5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                className="text-green-500"
-                strokeDasharray={`${(syncMeasurementCount / MAX_NTP_MEASUREMENTS) * 31.4} 31.4`}
-                strokeLinecap="round"
-                transform="rotate(-90 7 7)"
-                initial={{ strokeDasharray: "0 31.4" }}
-                animate={{
-                  strokeDasharray: `${(syncMeasurementCount / MAX_NTP_MEASUREMENTS) * 31.4} 31.4`,
-                }}
-                transition={{ duration: 0.3, ease: "easeInOut" }}
-              />
-            </motion.svg>
-            <span className="text-xs">
-              {syncMeasurementCount}/{MAX_NTP_MEASUREMENTS}
-            </span>
-          </div>
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="items-center hidden md:flex cursor-help">
+                  <motion.svg width="14" height="14" viewBox="0 0 14 14" className="mr-1">
+                    <circle
+                      cx="7"
+                      cy="7"
+                      r="5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      className="text-neutral-600"
+                    />
+                    <motion.circle
+                      cx="7"
+                      cy="7"
+                      r="5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      className="text-green-500"
+                      strokeDasharray={`${(syncMeasurementCount / MAX_NTP_MEASUREMENTS) * 31.4} 31.4`}
+                      strokeLinecap="round"
+                      transform="rotate(-90 7 7)"
+                      initial={{ strokeDasharray: "0 31.4" }}
+                      animate={{
+                        strokeDasharray: `${(syncMeasurementCount / MAX_NTP_MEASUREMENTS) * 31.4} 31.4`,
+                      }}
+                      transition={{ duration: 0.3, ease: "easeInOut" }}
+                    />
+                  </motion.svg>
+                  <span className="text-xs">
+                    {syncMeasurementCount}/{MAX_NTP_MEASUREMENTS}
+                  </span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-60 text-xs">
+                Clock sync with the server: {syncMeasurementCount} of {MAX_NTP_MEASUREMENTS} timing measurements. A full
+                ring keeps playback in sync across devices (offset {clockOffset.toFixed(1)}ms, round-trip{" "}
+                {roundTripEstimate.toFixed(0)}ms).
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <RoomNameAndId roomId={roomId} />
           <div className="flex items-center">
             <Users size={12} className="mr-1" />

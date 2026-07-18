@@ -219,8 +219,11 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    const center: L.LatLngTuple = mapMetadata?.center ?? [42.2808, -83.743];
-    const zoom = mapMetadata?.zoom ?? 17;
+    // Prefer the last view the user actually saw (survives remounts — e.g. the
+    // mobile Map panel toggled off/on) over the room default.
+    const savedView = useMapStore.getState().lastView;
+    const center: L.LatLngTuple = savedView?.center ?? mapMetadata?.center ?? [42.2808, -83.743];
+    const zoom = savedView?.zoom ?? mapMetadata?.zoom ?? 17;
 
     // Allow zooming to z=23 (street-furniture-level) even though tile providers
     // only ship native imagery up to z=19. Leaflet upscales the nearest-available
@@ -255,6 +258,17 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
     map.on("baselayerchange", (e: L.LayersControlEvent) => {
       const id = labelToId[e.name];
       if (id) activeTileLayerIdRef.current = id;
+    });
+
+    // Remember every settled view (pan/zoom/flyTo all end in moveend) so a
+    // remounted canvas can restore it. Only the visible instance records —
+    // the hidden zero-size twin (desktop/mobile layouts both stay mounted)
+    // never reflects what the user is looking at.
+    map.on("moveend", () => {
+      const size = map.getSize();
+      if (size.x === 0 || size.y === 0) return;
+      const c = map.getCenter();
+      useMapStore.getState().setLastView({ center: [c.lat, c.lng], zoom: map.getZoom() });
     });
 
     const drawnItems = new L.FeatureGroup();
@@ -509,7 +523,15 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
   // view", #64) — but only for NON-GPS users. A GPS user is anchored to their
   // own location (#66/#74); the room default orients initial-load and manual
   // users, and shouldn't yank someone away from where they physically are.
+  //
+  // appliedMetadataRef seeds with the metadata present at mount so the effect's
+  // initial run is a no-op — otherwise every remount (mobile Map panel toggled
+  // off/on) would snap the view back to the room default, discarding the
+  // restored lastView (#117).
+  const appliedMetadataRef = useRef(mapMetadata);
   useEffect(() => {
+    if (mapMetadata === appliedMetadataRef.current) return;
+    appliedMetadataRef.current = mapMetadata;
     if (!mapRef.current || !mapMetadata) return;
     if (useMapStore.getState().locationMode === "gps") return;
     mapRef.current.setView(mapMetadata.center, mapMetadata.zoom);

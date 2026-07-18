@@ -11,9 +11,8 @@ import axios from "axios";
 import { getApiUrl } from "./urls";
 
 const baseAxios = axios.create({
-  get baseURL() {
-    return getApiUrl();
-  },
+  baseURL: getApiUrl(),
+  withCredentials: true,
 });
 
 export const uploadAudioFile = async (data: { file: File; roomId: string; contextId?: string }) => {
@@ -130,7 +129,7 @@ export const fetchAudio = async (url: string) => {
 
 export async function fetchDefaultAudioSources() {
   try {
-    const response = await fetch(`${getApiUrl()}/default`);
+    const response = await fetch(`${getApiUrl()}/default`, { credentials: "include" });
 
     if (!response.ok) {
       console.error("Failed to fetch default audio sources:", response.status);
@@ -145,14 +144,17 @@ export async function fetchDefaultAudioSources() {
   }
 }
 
+// credentials: "include" — cross-origin fetch sends no cookies by default, so
+// behind an auth proxy (e.g. Authelia) these would get bounced to the auth
+// host and die on CORS. Mirrors withCredentials on baseAxios above.
 export async function fetchActiveRooms() {
-  const response = await fetch(`${getApiUrl()}/active-rooms`);
+  const response = await fetch(`${getApiUrl()}/active-rooms`, { credentials: "include" });
   const data: GetActiveRoomsType = await response.json();
   return data;
 }
 
 export async function fetchDiscoverRooms() {
-  const response = await fetch(`${getApiUrl()}/discover`);
+  const response = await fetch(`${getApiUrl()}/discover`, { credentials: "include" });
   const data: DiscoverRoomsType = await response.json();
   return data;
 }

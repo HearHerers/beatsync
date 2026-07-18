@@ -59,7 +59,10 @@ async function getPresignedUrl(
 }
 
 // Steps 1 + 2 for one file: presign, then PUT the bytes straight to storage.
-// Returns the public URL to register in step 3.
+// Returns the public URL to register in step 3. Sending the file size lets the
+// server dedupe: when the same file (display name + byte size) is already in
+// the room, it answers { existingUrl } and we skip the PUT entirely — re-running
+// an import of the same directory stores nothing twice.
 async function uploadFileBytes(roomId: string, filePath: string): Promise<string> {
   const fileName = basename(filePath);
   const contentType = contentTypeForFile(fileName)!; // collectAudioFiles only returns supported files
