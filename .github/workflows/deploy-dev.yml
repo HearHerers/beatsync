@@ -35,6 +35,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # See deploy-cyrus.yml: SSH is Tailscale-only. Join the tailnet as an
+      # ephemeral tag:ci node for the duration of the job.
+      - name: Connect to tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
       - name: SSH-trigger the dev deploy
         env:
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY_DEV }}
@@ -52,7 +61,7 @@ jobs:
           # in authorized_keys reads it via $SSH_ORIGINAL_COMMAND.
           ssh -p 2222 -i ~/.ssh/id_ed25519 \
             -o BatchMode=yes -o ConnectTimeout=15 \
-            cyrus@cyrus.hearhere.now \
+            beatsync@purkinje.tail46b71f.ts.net \
             "$BRANCH" 2>&1 | tee deploy.log
 
       - name: Open issue on failure

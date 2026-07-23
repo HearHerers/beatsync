@@ -28,6 +28,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # SSH to the workstation is Tailscale-only (its ufw allows 2222 solely on
+      # tailscale0). Join the tailnet as an ephemeral, tag:ci-tagged node for the
+      # duration of the job; it's removed automatically when the job ends.
+      - name: Connect to tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
       - name: SSH-trigger the deploy script
         id: ssh
         env:
@@ -46,7 +56,7 @@ jobs:
           # exit code rather than tee's success.
           ssh -p 2222 -i ~/.ssh/id_ed25519 \
             -o BatchMode=yes -o ConnectTimeout=15 \
-            cyrus@cyrus.hearhere.now 2>&1 | tee deploy.log
+            beatsync@purkinje.tail46b71f.ts.net 2>&1 | tee deploy.log
 
       - name: Open issue on failure
         if: failure()
