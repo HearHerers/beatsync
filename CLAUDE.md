@@ -42,6 +42,15 @@ bun run room:import <roomId> <dir>  # Bulk-import local audio files into a room 
 #   bun scripts/room-manage.ts purge [--yes]
 #   bun scripts/room-admin-token.ts <id>
 #   bun scripts/import-tracks.ts <roomId> <file-or-dir>... [--context <shapeId>] [--concurrency <n>] [--dry-run]
+bun run loadtest:map     # Load-test a map room: simulated listeners connect, sync, and
+# download zone audio, reporting WHY requests failed (nginx throttling vs storage
+# vs timeouts), cache hit rate, and whether you are request- or bandwidth-bound.
+#   --audio-only        hammer S3/MinIO alone, no app server needed
+#   --seed              build a disposable test room from audio already in the bucket
+#   --behavior preload|wander|enter    (preload = everyone pulls every zone at once)
+# Run it from SEVERAL machines to test per-IP rate limits; from one machine every
+# virtual listener shares a source IP, which is what a venue behind one NAT (or a
+# host behind a tunnel) actually looks like. Both are worth testing.
 bun run type-check       # tsc --noEmit
 
 # Client-specific (run from apps/client/)
