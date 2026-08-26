@@ -10,6 +10,7 @@ import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useState } from "react";
 import { FaGithub } from "react-icons/fa";
+import { RoomQRCode } from "../dashboard/CopyRoom";
 import { SyncProgress } from "../ui/SyncProgress";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 
@@ -113,6 +114,8 @@ export const TopBar = ({ roomId, panelControls }: TopBarProps) => {
 
         <div className="flex items-center justify-center gap-2.5">
           {panelControls}
+          {/* Share / QR — moved here from the removed left sidebar (#93). */}
+          <RoomQRCode />
           {/* GitHub icon in the top right */}
           <a
             href={SOCIAL_LINKS.github}
