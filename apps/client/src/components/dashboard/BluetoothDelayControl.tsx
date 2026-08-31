@@ -22,13 +22,23 @@ interface Preset {
   hint?: string;
 }
 
-// Common codec latencies — rough averages from public measurements.
+// Common phone/headphone latencies — rough real-world averages from public
+// measurements. These are the delay the gear ADDS (we schedule playback earlier
+// by this much to compensate). Bluetooth codec latency is dominated by the codec
+// + device buffering; values are approximate and the custom slider fine-tunes.
 const PRESETS: Preset[] = [
-  { label: "Wired / speakers (no offset)", delayMs: 0, hint: "no compensation" },
-  { label: "LE Audio (LC3)", delayMs: 25 },
-  { label: "aptX LL / Bose QC", delayMs: 40 },
-  { label: "aptX", delayMs: 100 },
-  { label: "AirPods / AAC", delayMs: 180 },
+  { label: "Wired / speakers", delayMs: 0, hint: "No offset — wired earbuds, AUX, USB-C, or a plugged-in speaker" },
+  { label: "LE Audio (LC3)", delayMs: 30, hint: "Bluetooth LE Audio — the new low-latency standard (~20–40ms)" },
+  { label: "aptX Adaptive / LL", delayMs: 40, hint: "aptX Adaptive & aptX Low Latency (Android, gaming buds) (~40ms)" },
+  { label: "aptX", delayMs: 90, hint: "Standard Qualcomm aptX (many Android phones) (~70–100ms)" },
+  { label: "AirPods / AAC", delayMs: 150, hint: "AirPods & most iPhone Bluetooth (AAC) (~130–180ms)" },
+  { label: "aptX HD", delayMs: 180, hint: "aptX HD hi-res (higher latency than standard aptX) (~180ms)" },
+  { label: "LDAC (Sony/Android)", delayMs: 200, hint: "Sony LDAC hi-res — highest latency for quality (~180–200ms)" },
+  {
+    label: "SBC / generic BT",
+    delayMs: 220,
+    hint: "Default SBC codec — generic Bluetooth speakers & older gear (~200–250ms)",
+  },
 ];
 
 const MAX_DELAY_MS = 500;
