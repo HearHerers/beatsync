@@ -11,7 +11,6 @@ import { MAX_NTP_MEASUREMENTS, useGlobalStore } from "@/store/global";
 import { Separator } from "../ui/separator";
 import { BluetoothDelayControl } from "./BluetoothDelayControl";
 import { GlobalVolumeControl } from "./GlobalVolumeControl";
-import { MobileNudgeControl } from "./MobileNudgeControl";
 
 interface SettingsPanelProps {
   className?: string;
@@ -46,10 +45,6 @@ export const SettingsPanel = ({ className }: SettingsPanelProps) => {
       <Separator className="bg-neutral-800/50" />
 
       <GlobalVolumeControl isMobile />
-
-      <Separator className="bg-neutral-800/50" />
-
-      <MobileNudgeControl />
 
       {/* Tips Section */}
       <div className="mt-auto pb-4 pt-2 text-neutral-400">
