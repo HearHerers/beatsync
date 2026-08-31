@@ -622,8 +622,25 @@ export const MapCanvas = ({ canMutate }: MapCanvasProps) => {
         // read fresh so this doesn't go stale when the selection changes.
         layer.on("click", (e) => {
           L.DomEvent.stopPropagation(e);
-          const map = useMapStore.getState();
-          map.setSelectedShapeId(map.selectedShapeId === shape.id ? null : shape.id);
+          const store = useMapStore.getState();
+          if (store.locationMode === "manual") {
+            // Tap-to-move (#75): in manual mode, tapping a zone steps you into it
+            // (the shape layer would otherwise swallow the click, so you'd have to
+            // drag your marker in). Also select it so its playlist shows.
+            const { lat, lng } = (e as L.LeafletMouseEvent).latlng;
+            store.setOwnPosition({ lat, lng });
+            const ws = useGlobalStore.getState().socket;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              sendWSRequest({
+                ws,
+                request: { type: ClientActionEnum.enum.SET_GEO_POSITION, lat, lng },
+              });
+            }
+            store.setSelectedShapeId(shape.id);
+          } else {
+            // GPS mode: can't move by tapping, so keep the select/deselect toggle.
+            store.setSelectedShapeId(store.selectedShapeId === shape.id ? null : shape.id);
+          }
         });
       } else if (layer instanceof L.Circle && wantsCircle) {
         const { center, radius } = coords as { center: [number, number]; radius: number };
